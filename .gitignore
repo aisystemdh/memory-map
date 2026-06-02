@@ -1,0 +1,39 @@
+# 의존성
+node_modules/
+
+# Expo
+.expo/
+.expo-shared/
+dist/
+web-build/
+expo-env.d.ts
+
+# 네이티브 빌드 결과물
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+ios/
+android/
+
+# 환경변수 / 비밀값 (절대 커밋 금지)
+.env
+.env.*
+!.env.example
+
+# 로그
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.log
+
+# 운영체제 / 에디터
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 기타
+*.tsbuildinfo
