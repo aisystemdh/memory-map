@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import MapView, { Marker, Polyline, Region } from 'react-native-maps';
+import CalendarModal from './components/CalendarModal';
+import PlaceCard from './components/PlaceCard';
 import SavePlaceModal from './components/SavePlaceModal';
 import SearchBar from './components/SearchBar';
 import { KakaoPlace } from './lib/kakao';
@@ -20,15 +22,19 @@ export default function App() {
   // 검색으로 고른, 아직 저장 전인 장소 (미리보기 핀 + 저장 모달용)
   const [pending, setPending] = useState<KakaoPlace | null>(null);
   const [saving, setSaving] = useState(false);
-  // 선택된 날짜 (이 날짜의 핀들만 또렷하게 + 선으로 연결). 핀을 누르면 그 날짜로 바뀜.
+  // 달력에서 고른 날짜 (이 날짜의 핀·동선만 강조, 나머지는 흐리게)
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  // 달력 열림 여부
+  const [calendarVisible, setCalendarVisible] = useState(false);
+  // 핀을 눌렀을 때 보여줄 장소 카드
+  const [selectedPlace, setSelectedPlace] = useState<Place | null>(null);
 
   // 앱 시작 시 저장된 핀 불러오기
   useEffect(() => {
     fetchPlaces()
       .then((rows) => {
         setPlaces(rows);
-        // 별도 달력 UI 없이도 바로 보이도록, 가장 최근에 저장한 날짜를 기본 선택
+        // 가장 최근에 기록한 날짜를 기본 선택해서 동선이 바로 보이게
         if (rows.length > 0) setSelectedDate(rows[0].visited_on);
       })
       .catch((e) =>
@@ -36,14 +42,25 @@ export default function App() {
       );
   }, []);
 
-  // 선택된 날짜의 장소들을 시간순(저장한 순서)으로 정렬한 좌표 목록
-  const selectedPath = useMemo(() => {
+  // 기록(장소)이 있는 날짜들 (중복 제거) — 달력에 점으로 표시
+  const recordedDates = useMemo(
+    () => Array.from(new Set(places.map((p) => p.visited_on))),
+    [places]
+  );
+
+  // 선택된 날짜의 장소들을 시간순(저장한 순서)으로 정렬
+  const selectedDayPlaces = useMemo(() => {
     if (!selectedDate) return [];
     return places
       .filter((p) => p.visited_on === selectedDate)
-      .sort((a, b) => a.created_at.localeCompare(b.created_at))
-      .map((p) => ({ latitude: p.latitude, longitude: p.longitude }));
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
   }, [places, selectedDate]);
+
+  // 동선(선)을 그릴 좌표 목록
+  const selectedPath = useMemo(
+    () => selectedDayPlaces.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
+    [selectedDayPlaces]
+  );
 
   // 검색 결과를 선택하면 지도 이동 + 저장 모달 열기
   function handleSelect(place: KakaoPlace) {
@@ -54,6 +71,24 @@ export default function App() {
       latitudeDelta: 0.01,
       longitudeDelta: 0.01,
     });
+  }
+
+  // 달력에서 날짜를 고르면: 그 날짜를 강조하고 첫 장소로 지도 이동
+  function handleSelectDate(date: string) {
+    setSelectedDate(date);
+    setCalendarVisible(false);
+    setSelectedPlace(null);
+    const first = places
+      .filter((p) => p.visited_on === date)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+    if (first) {
+      mapRef.current?.animateToRegion({
+        latitude: first.latitude,
+        longitude: first.longitude,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      });
+    }
   }
 
   // 모달에서 저장 누르면 Supabase에 저장
@@ -90,20 +125,14 @@ export default function App() {
             <Marker
               key={p.id}
               coordinate={{ latitude: p.latitude, longitude: p.longitude }}
-              title={`${p.name} (${p.visited_on})`}
-              description={p.memo ?? undefined}
               opacity={dimmed ? 0.3 : 1}
-              onPress={() => setSelectedDate(p.visited_on)}
+              onPress={() => setSelectedPlace(p)}
             />
           );
         })}
 
         {selectedPath.length >= 2 && (
-          <Polyline
-            coordinates={selectedPath}
-            strokeColor="#1d4ed8"
-            strokeWidth={5}
-          />
+          <Polyline coordinates={selectedPath} strokeColor="#1d4ed8" strokeWidth={5} />
         )}
 
         {pending && (
@@ -116,6 +145,23 @@ export default function App() {
       </MapView>
 
       <SearchBar onSelect={handleSelect} />
+
+      <TouchableOpacity
+        style={styles.calendarButton}
+        onPress={() => setCalendarVisible(true)}
+      >
+        <Text style={styles.calendarButtonText}>달력</Text>
+      </TouchableOpacity>
+
+      <PlaceCard place={selectedPlace} onClose={() => setSelectedPlace(null)} />
+
+      <CalendarModal
+        visible={calendarVisible}
+        recordedDates={recordedDates}
+        selectedDate={selectedDate}
+        onSelectDate={handleSelectDate}
+        onClose={() => setCalendarVisible(false)}
+      />
 
       <SavePlaceModal
         place={pending}
@@ -134,5 +180,24 @@ const styles = StyleSheet.create({
   map: {
     width: '100%',
     height: '100%',
+  },
+  calendarButton: {
+    position: 'absolute',
+    right: 16,
+    top: '45%',
+    backgroundColor: '#1d4ed8',
+    borderRadius: 24,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  calendarButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
   },
 });
