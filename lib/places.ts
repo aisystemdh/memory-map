@@ -10,6 +10,7 @@ export type Place = {
   memo: string | null;
   address: string | null;
   kakao_place_id: string | null;
+  created_at: string; // 같은 날 안에서 시간순 정렬에 사용
 };
 
 // 새 장소를 저장할 때 넘기는 값
@@ -27,7 +28,7 @@ export type NewPlace = {
 export async function fetchPlaces(): Promise<Place[]> {
   const { data, error } = await supabase
     .from('places')
-    .select('id, name, latitude, longitude, visited_on, memo, address, kakao_place_id')
+    .select('id, name, latitude, longitude, visited_on, memo, address, kakao_place_id, created_at')
     .order('created_at', { ascending: false });
 
   if (error) throw error;
@@ -39,7 +40,7 @@ export async function addPlace(place: NewPlace): Promise<Place> {
   const { data, error } = await supabase
     .from('places')
     .insert(place)
-    .select('id, name, latitude, longitude, visited_on, memo, address, kakao_place_id')
+    .select('id, name, latitude, longitude, visited_on, memo, address, kakao_place_id, created_at')
     .single();
 
   if (error) throw error;
