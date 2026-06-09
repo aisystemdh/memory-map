@@ -7,6 +7,7 @@ import SavePlaceModal from './components/SavePlaceModal';
 import SearchBar from './components/SearchBar';
 import { KakaoPlace } from './lib/kakao';
 import { addPlace, fetchPlaces, Place } from './lib/places';
+import { useCurrentLocation } from './hooks/useCurrentLocation';
 
 const INITIAL_REGION: Region = {
   latitude: 37.5665,
@@ -28,6 +29,8 @@ export default function App() {
   const [calendarVisible, setCalendarVisible] = useState(false);
   // 핀을 눌렀을 때 보여줄 장소 카드
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null);
+  // 현재 위치 + 위치 권한 상태 (별도 훅으로 분리)
+  const { location, status, refreshLocation } = useCurrentLocation();
 
   // 앱 시작 시 저장된 핀 불러오기
   useEffect(() => {
@@ -91,6 +94,22 @@ export default function App() {
     }
   }
 
+  // "내 위치" 버튼: 현재 위치로 지도를 부드럽게 이동
+  // 아직 위치를 못 가져왔으면 그 자리에서 한 번 더 시도한다.
+  async function handleRecenter() {
+    const coords = location ?? (await refreshLocation());
+    if (!coords) {
+      Alert.alert('현재 위치', '현재 위치를 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      return;
+    }
+    mapRef.current?.animateToRegion({
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      latitudeDelta: 0.01,
+      longitudeDelta: 0.01,
+    });
+  }
+
   // 모달에서 저장 누르면 Supabase에 저장
   async function handleSave(visitedOn: string, memo: string) {
     if (!pending) return;
@@ -117,7 +136,12 @@ export default function App() {
 
   return (
     <View style={styles.container}>
-      <MapView ref={mapRef} style={styles.map} initialRegion={INITIAL_REGION}>
+      <MapView
+        ref={mapRef}
+        style={styles.map}
+        initialRegion={INITIAL_REGION}
+        showsUserLocation={status === 'granted'}
+      >
         {places.map((p) => {
           // 선택된 날짜가 아니면 핀을 흐리게
           const dimmed = selectedDate !== null && p.visited_on !== selectedDate;
@@ -152,6 +176,27 @@ export default function App() {
       >
         <Text style={styles.calendarButtonText}>달력</Text>
       </TouchableOpacity>
+
+      {/* "내 위치" 버튼: 권한이 허용된 경우 보여준다 */}
+      {status === 'granted' && (
+        <TouchableOpacity style={styles.locationButton} onPress={handleRecenter}>
+          <Text style={styles.locationButtonText}>내 위치</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* 권한 거부·오류 시 짧은 안내 (지도·기존 기능은 그대로 동작) */}
+      {(status === 'denied' || status === 'error') && (
+        <View style={styles.permissionNotice}>
+          <Text style={styles.permissionNoticeText}>위치 권한이 필요합니다</Text>
+        </View>
+      )}
+
+      {/* [임시 진단용] 현재 위치 상태 표시 — 확인 끝나면 지웁니다 */}
+      <View style={styles.debugBadge}>
+        <Text style={styles.debugBadgeText}>
+          위치상태: {status} / 좌표: {location ? '있음' : '없음'}
+        </Text>
+      </View>
 
       <PlaceCard place={selectedPlace} onClose={() => setSelectedPlace(null)} />
 
@@ -198,6 +243,56 @@ const styles = StyleSheet.create({
   calendarButtonText: {
     color: '#fff',
     fontSize: 15,
+    fontWeight: '700',
+  },
+  // "내 위치" 버튼 — 달력 버튼 바로 아래 같은 스타일로
+  locationButton: {
+    position: 'absolute',
+    right: 16,
+    top: '45%',
+    marginTop: 56,
+    backgroundColor: '#1d4ed8',
+    borderRadius: 24,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  locationButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  // 권한 거부 안내 — 화면 하단 중앙에 작게
+  permissionNotice: {
+    position: 'absolute',
+    bottom: 24,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  permissionNoticeText: {
+    color: '#fff',
+    fontSize: 13,
+  },
+  // [임시 진단용] 화면 상단 좌측에 현재 위치 상태 표시
+  debugBadge: {
+    position: 'absolute',
+    top: 60,
+    left: 16,
+    backgroundColor: 'rgba(220,38,38,0.85)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  debugBadgeText: {
+    color: '#fff',
+    fontSize: 12,
     fontWeight: '700',
   },
 });
