@@ -39,7 +39,9 @@ export async function fetchPlaces(): Promise<Place[]> {
 export async function addPlace(place: NewPlace): Promise<Place> {
   const { data, error } = await supabase
     .from('places')
-    .insert(place)
+    // status는 NOT NULL(기본값 없음)이라 항상 명시해야 한다.
+    // 이 화면은 "다녀온 곳 + 날짜"를 기록하는 흐름이므로 'visited' 고정.
+    .insert({ ...place, status: 'visited' })
     .select('id, name, latitude, longitude, visited_on, memo, address, kakao_place_id, created_at')
     .single();
 

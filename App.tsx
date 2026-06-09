@@ -191,13 +191,6 @@ export default function App() {
         </View>
       )}
 
-      {/* [임시 진단용] 현재 위치 상태 표시 — 확인 끝나면 지웁니다 */}
-      <View style={styles.debugBadge}>
-        <Text style={styles.debugBadgeText}>
-          위치상태: {status} / 좌표: {location ? '있음' : '없음'}
-        </Text>
-      </View>
-
       <PlaceCard place={selectedPlace} onClose={() => setSelectedPlace(null)} />
 
       <CalendarModal
@@ -279,20 +272,5 @@ const styles = StyleSheet.create({
   permissionNoticeText: {
     color: '#fff',
     fontSize: 13,
-  },
-  // [임시 진단용] 화면 상단 좌측에 현재 위치 상태 표시
-  debugBadge: {
-    position: 'absolute',
-    top: 60,
-    left: 16,
-    backgroundColor: 'rgba(220,38,38,0.85)',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  debugBadgeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
   },
 });
