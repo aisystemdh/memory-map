@@ -1,14 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import MapView, { Marker, Polyline, Region } from 'react-native-maps';
 import CalendarModal from './components/CalendarModal';
+import CategoryModal from './components/CategoryModal';
 import PlaceCard from './components/PlaceCard';
+import PlaceMarker from './components/PlaceMarker';
 import SavePlaceModal from './components/SavePlaceModal';
 import SearchBar from './components/SearchBar';
 import { KakaoPlace } from './lib/kakao';
-import { addPlace, fetchPlaces, Place } from './lib/places';
+import { addPlace, fetchPlaces, updatePlaceCategory, Place } from './lib/places';
 import { uploadPhotos, PickedPhoto } from './lib/photos';
 import { useCurrentLocation } from './hooks/useCurrentLocation';
+import { useCategories } from './hooks/useCategories';
+
+// 보기모드: 날짜뷰(동선) / 카테고리뷰(분류 색 핀)
+type ViewMode = 'date' | 'category';
 
 const INITIAL_REGION: Region = {
   latitude: 37.5665,
@@ -32,6 +38,22 @@ export default function App() {
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null);
   // 현재 위치 + 위치 권한 상태 (별도 훅으로 분리)
   const { location, status, refreshLocation } = useCurrentLocation();
+  // 카테고리 목록 + 추가/삭제
+  const { categories, add: addCategoryItem, remove: removeCategoryItem } = useCategories();
+  // 보기모드 (기본: 날짜뷰)
+  const [viewMode, setViewMode] = useState<ViewMode>('date');
+  // 카테고리 관리 모달 열림 여부
+  const [categoryModalVisible, setCategoryModalVisible] = useState(false);
+  // 카테고리뷰 진입 시 보여줄 "카테고리 고르기" 리스트 열림 여부
+  const [categoryPickerVisible, setCategoryPickerVisible] = useState(false);
+  // 카테고리뷰에서의 필터 (null = 전체)
+  const [filterCategoryId, setFilterCategoryId] = useState<string | null>(null);
+
+  // 핀 색 결정용: 카테고리 id → 색
+  const categoryColorById = useMemo(
+    () => new Map(categories.map((c) => [c.id, c.color])),
+    [categories]
+  );
 
   // 앱 시작 시 저장된 핀 불러오기
   useEffect(() => {
@@ -111,8 +133,41 @@ export default function App() {
     });
   }
 
+  // 카드에서 분류 변경: DB 갱신 후 화면 상태도 맞춰준다.
+  async function handleChangeCategory(placeId: string, categoryId: string | null) {
+    try {
+      await updatePlaceCategory(placeId, categoryId);
+      setPlaces((prev) =>
+        prev.map((p) => (p.id === placeId ? { ...p, category_id: categoryId } : p))
+      );
+      setSelectedPlace((prev) =>
+        prev && prev.id === placeId ? { ...prev, category_id: categoryId } : prev
+      );
+    } catch (e) {
+      Alert.alert('분류 변경 실패', e instanceof Error ? e.message : '오류가 발생했습니다.');
+    }
+  }
+
+  // 카테고리 삭제: DB가 장소의 분류를 자동 해제(SET NULL)하므로 화면 상태도 맞춰준다.
+  async function handleRemoveCategory(id: string) {
+    const ok = await removeCategoryItem(id);
+    if (!ok) return;
+    setPlaces((prev) =>
+      prev.map((p) => (p.category_id === id ? { ...p, category_id: null } : p))
+    );
+    setSelectedPlace((prev) =>
+      prev && prev.category_id === id ? { ...prev, category_id: null } : prev
+    );
+    if (filterCategoryId === id) setFilterCategoryId(null);
+  }
+
   // 모달에서 저장 누르면 Supabase에 저장 (+ 고른 사진 업로드)
-  async function handleSave(visitedOn: string, memo: string, photos: PickedPhoto[]) {
+  async function handleSave(
+    visitedOn: string,
+    memo: string,
+    photos: PickedPhoto[],
+    categoryId: string | null
+  ) {
     if (!pending) return;
     setSaving(true);
     try {
@@ -124,6 +179,7 @@ export default function App() {
         memo: memo || null,
         address: pending.address || null,
         kakao_place_id: pending.id,
+        category_id: categoryId,
       });
       setPlaces((prev) => [saved, ...prev]);
       setSelectedDate(saved.visited_on);
@@ -157,19 +213,27 @@ export default function App() {
         showsUserLocation={status === 'granted'}
       >
         {places.map((p) => {
-          // 선택된 날짜가 아니면 핀을 흐리게
-          const dimmed = selectedDate !== null && p.visited_on !== selectedDate;
+          // 카테고리뷰에서 특정 분류만 보기로 했으면 나머지는 숨김
+          if (viewMode === 'category' && filterCategoryId && p.category_id !== filterCategoryId) {
+            return null;
+          }
+          // 날짜뷰: 선택된 날짜가 아니면 핀을 흐리게 (카테고리뷰는 전부 선명하게)
+          const dimmed =
+            viewMode === 'date' && selectedDate !== null && p.visited_on !== selectedDate;
           return (
-            <Marker
+            <PlaceMarker
               key={p.id}
               coordinate={{ latitude: p.latitude, longitude: p.longitude }}
+              markerStyle={{
+                color: p.category_id ? categoryColorById.get(p.category_id) ?? null : null,
+              }}
               opacity={dimmed ? 0.3 : 1}
               onPress={() => setSelectedPlace(p)}
             />
           );
         })}
 
-        {selectedPath.length >= 2 && (
+        {viewMode === 'date' && selectedPath.length >= 2 && (
           <Polyline coordinates={selectedPath} strokeColor="#1d4ed8" strokeWidth={5} />
         )}
 
@@ -198,6 +262,33 @@ export default function App() {
         </TouchableOpacity>
       )}
 
+      {/* 보기모드 버튼 — 날짜뷰에서 누르면 카테고리 고르기 리스트가 열리고,
+          카테고리뷰에서 누르면 날짜뷰로 돌아온다. (라벨 = 누르면 이동할 곳) */}
+      <TouchableOpacity
+        style={styles.viewModeButton}
+        onPress={() => {
+          if (viewMode === 'date') {
+            setCategoryPickerVisible(true);
+          } else {
+            setViewMode('date');
+            setFilterCategoryId(null);
+          }
+        }}
+      >
+        <Text style={styles.viewModeButtonText}>
+          {viewMode === 'date' ? '카테고리뷰' : '날짜뷰'}
+        </Text>
+      </TouchableOpacity>
+
+      {/* 카테고리 관리 모달 열기 */}
+      <TouchableOpacity
+        style={styles.categoryButton}
+        onPress={() => setCategoryModalVisible(true)}
+      >
+        <Text style={styles.categoryButtonText}>카테고리</Text>
+      </TouchableOpacity>
+
+
       {/* 권한 거부·오류 시 짧은 안내 (지도·기존 기능은 그대로 동작) */}
       {(status === 'denied' || status === 'error') && (
         <View style={styles.permissionNotice}>
@@ -205,7 +296,12 @@ export default function App() {
         </View>
       )}
 
-      <PlaceCard place={selectedPlace} onClose={() => setSelectedPlace(null)} />
+      <PlaceCard
+        place={selectedPlace}
+        categories={categories}
+        onChangeCategory={handleChangeCategory}
+        onClose={() => setSelectedPlace(null)}
+      />
 
       <CalendarModal
         visible={calendarVisible}
@@ -218,9 +314,72 @@ export default function App() {
       <SavePlaceModal
         place={pending}
         saving={saving}
+        categories={categories}
         onCancel={() => setPending(null)}
         onSave={handleSave}
       />
+
+      <CategoryModal
+        visible={categoryModalVisible}
+        categories={categories}
+        onAdd={addCategoryItem}
+        onRemove={handleRemoveCategory}
+        onClose={() => setCategoryModalVisible(false)}
+      />
+
+      {/* 카테고리뷰 진입용 고르기 리스트 — 고르면 그 분류의 핀만 보인다 */}
+      <Modal
+        visible={categoryPickerVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setCategoryPickerVisible(false)}
+      >
+        <View style={styles.pickerBackdrop}>
+          <View style={styles.pickerSheet}>
+            <Text style={styles.pickerTitle}>어떤 카테고리를 볼까요?</Text>
+
+            {categories.length === 0 ? (
+              <Text style={styles.pickerEmpty}>
+                아직 카테고리가 없습니다. '카테고리' 버튼에서 먼저 만들어 주세요.
+              </Text>
+            ) : (
+              <ScrollView style={styles.pickerList}>
+                <TouchableOpacity
+                  style={styles.pickerItem}
+                  onPress={() => {
+                    setFilterCategoryId(null);
+                    setViewMode('category');
+                    setCategoryPickerVisible(false);
+                  }}
+                >
+                  <Text style={styles.pickerItemText}>전체 보기</Text>
+                </TouchableOpacity>
+                {categories.map((c) => (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={styles.pickerItem}
+                    onPress={() => {
+                      setFilterCategoryId(c.id);
+                      setViewMode('category');
+                      setCategoryPickerVisible(false);
+                    }}
+                  >
+                    <View style={[styles.pickerDot, { backgroundColor: c.color }]} />
+                    <Text style={styles.pickerItemText}>{c.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+
+            <TouchableOpacity
+              style={styles.pickerCancel}
+              onPress={() => setCategoryPickerVisible(false)}
+            >
+              <Text style={styles.pickerCancelText}>닫기</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -272,6 +431,106 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '700',
+  },
+  // 보기모드 토글 버튼 — 내 위치 버튼 아래
+  viewModeButton: {
+    position: 'absolute',
+    right: 16,
+    top: '45%',
+    marginTop: 112,
+    backgroundColor: '#0f766e',
+    borderRadius: 24,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  viewModeButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  // 카테고리 관리 버튼 — 보기모드 버튼 아래
+  categoryButton: {
+    position: 'absolute',
+    right: 16,
+    top: '45%',
+    marginTop: 168,
+    backgroundColor: '#7c3aed',
+    borderRadius: 24,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  categoryButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  // 카테고리 고르기 리스트 모달
+  pickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  pickerSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 32,
+    maxHeight: '60%',
+  },
+  pickerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 8,
+  },
+  pickerList: {
+    maxHeight: 280,
+  },
+  pickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  pickerDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    marginRight: 10,
+  },
+  pickerItemText: {
+    fontSize: 16,
+    color: '#111827',
+    fontWeight: '600',
+  },
+  pickerEmpty: {
+    fontSize: 14,
+    color: '#9ca3af',
+    paddingVertical: 12,
+  },
+  pickerCancel: {
+    backgroundColor: '#f3f4f6',
+    borderRadius: 10,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginTop: 14,
+  },
+  pickerCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
   },
   // 권한 거부 안내 — 화면 하단 중앙에 작게
   permissionNotice: {

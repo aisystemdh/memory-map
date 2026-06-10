@@ -2,6 +2,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useState } from 'react';
 import {
   Image,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
@@ -13,13 +14,20 @@ import {
 } from 'react-native';
 import { KakaoPlace } from '../lib/kakao';
 import { pickPhotos, PickedPhoto } from '../lib/photos';
+import { Category } from '../lib/categories';
 
 type Props = {
   // 저장할 대상 장소. null이면 모달이 닫힘.
   place: KakaoPlace | null;
   saving: boolean;
+  categories: Category[];
   onCancel: () => void;
-  onSave: (visitedOn: string, memo: string, photos: PickedPhoto[]) => void;
+  onSave: (
+    visitedOn: string,
+    memo: string,
+    photos: PickedPhoto[],
+    categoryId: string | null
+  ) => void;
 };
 
 // Date 객체를 YYYY-MM-DD 문자열로 (현지 시간 기준)
@@ -30,13 +38,15 @@ function toDateString(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-export default function SavePlaceModal({ place, saving, onCancel, onSave }: Props) {
+export default function SavePlaceModal({ place, saving, categories, onCancel, onSave }: Props) {
   const [date, setDate] = useState<Date>(new Date());
   const [memo, setMemo] = useState('');
   const [showPicker, setShowPicker] = useState(Platform.OS === 'ios');
   // 아직 저장 전, 사용자가 고른 사진들 (로컬 미리보기)
   const [photos, setPhotos] = useState<PickedPhoto[]>([]);
   const [picking, setPicking] = useState(false);
+  // 선택한 카테고리 (null = 분류 없음)
+  const [categoryId, setCategoryId] = useState<string | null>(null);
 
   // 다음 저장을 위해 입력값 초기화
   function reset() {
@@ -44,10 +54,11 @@ export default function SavePlaceModal({ place, saving, onCancel, onSave }: Prop
     setDate(new Date());
     setShowPicker(Platform.OS === 'ios');
     setPhotos([]);
+    setCategoryId(null);
   }
 
   function handleSave() {
-    onSave(toDateString(date), memo.trim(), photos);
+    onSave(toDateString(date), memo.trim(), photos, categoryId);
     reset();
   }
 
@@ -75,7 +86,11 @@ export default function SavePlaceModal({ place, saving, onCancel, onSave }: Prop
       animationType="slide"
       onRequestClose={handleCancel}
     >
-      <View style={styles.backdrop}>
+      {/* 키보드가 올라오면 시트를 그만큼 위로 밀어 입력칸이 가려지지 않게 한다 */}
+      <KeyboardAvoidingView
+        style={styles.backdrop}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
         <View style={styles.sheet}>
           <Text style={styles.title}>{place?.name}</Text>
           {place?.address ? (
@@ -112,6 +127,26 @@ export default function SavePlaceModal({ place, saving, onCancel, onSave }: Prop
             onChangeText={setMemo}
             maxLength={100}
           />
+
+          <Text style={styles.label}>카테고리</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <TouchableOpacity
+              style={[styles.chip, categoryId === null && styles.chipSelected]}
+              onPress={() => setCategoryId(null)}
+            >
+              <Text style={styles.chipText}>분류 없음</Text>
+            </TouchableOpacity>
+            {categories.map((c) => (
+              <TouchableOpacity
+                key={c.id}
+                style={[styles.chip, categoryId === c.id && styles.chipSelected]}
+                onPress={() => setCategoryId(c.id)}
+              >
+                <View style={[styles.chipDot, { backgroundColor: c.color }]} />
+                <Text style={styles.chipText}>{c.name}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
 
           <Text style={styles.label}>사진</Text>
           {photos.length > 0 && (
@@ -152,7 +187,7 @@ export default function SavePlaceModal({ place, saving, onCancel, onSave }: Prop
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -204,6 +239,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f3f4f6',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginRight: 8,
+  },
+  chipSelected: {
+    backgroundColor: '#dbeafe',
+    borderWidth: 1.5,
+    borderColor: '#2563eb',
+  },
+  chipDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 6,
+  },
+  chipText: {
+    fontSize: 14,
+    color: '#374151',
+    fontWeight: '600',
   },
   thumbRow: {
     marginBottom: 4,
