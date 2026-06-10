@@ -1,8 +1,10 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useState } from 'react';
 import {
+  Image,
   Modal,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -10,13 +12,14 @@ import {
   View,
 } from 'react-native';
 import { KakaoPlace } from '../lib/kakao';
+import { pickPhotos, PickedPhoto } from '../lib/photos';
 
 type Props = {
   // 저장할 대상 장소. null이면 모달이 닫힘.
   place: KakaoPlace | null;
   saving: boolean;
   onCancel: () => void;
-  onSave: (visitedOn: string, memo: string) => void;
+  onSave: (visitedOn: string, memo: string, photos: PickedPhoto[]) => void;
 };
 
 // Date 객체를 YYYY-MM-DD 문자열로 (현지 시간 기준)
@@ -31,13 +34,38 @@ export default function SavePlaceModal({ place, saving, onCancel, onSave }: Prop
   const [date, setDate] = useState<Date>(new Date());
   const [memo, setMemo] = useState('');
   const [showPicker, setShowPicker] = useState(Platform.OS === 'ios');
+  // 아직 저장 전, 사용자가 고른 사진들 (로컬 미리보기)
+  const [photos, setPhotos] = useState<PickedPhoto[]>([]);
+  const [picking, setPicking] = useState(false);
 
-  function handleSave() {
-    onSave(toDateString(date), memo.trim());
-    // 다음 저장을 위해 초기화
+  // 다음 저장을 위해 입력값 초기화
+  function reset() {
     setMemo('');
     setDate(new Date());
     setShowPicker(Platform.OS === 'ios');
+    setPhotos([]);
+  }
+
+  function handleSave() {
+    onSave(toDateString(date), memo.trim(), photos);
+    reset();
+  }
+
+  // 취소 시에도 고른 사진을 비워 다음 장소에 섞이지 않게 한다.
+  function handleCancel() {
+    reset();
+    onCancel();
+  }
+
+  // 사진첩에서 골라 미리보기 목록에 추가
+  async function handlePickPhotos() {
+    setPicking(true);
+    try {
+      const picked = await pickPhotos();
+      if (picked.length > 0) setPhotos((prev) => [...prev, ...picked]);
+    } finally {
+      setPicking(false);
+    }
   }
 
   return (
@@ -45,7 +73,7 @@ export default function SavePlaceModal({ place, saving, onCancel, onSave }: Prop
       visible={place !== null}
       transparent
       animationType="slide"
-      onRequestClose={onCancel}
+      onRequestClose={handleCancel}
     >
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
@@ -85,10 +113,32 @@ export default function SavePlaceModal({ place, saving, onCancel, onSave }: Prop
             maxLength={100}
           />
 
+          <Text style={styles.label}>사진</Text>
+          {photos.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.thumbRow}
+            >
+              {photos.map((p, i) => (
+                <Image key={i} source={{ uri: p.uri }} style={styles.thumb} />
+              ))}
+            </ScrollView>
+          )}
+          <TouchableOpacity
+            style={styles.addPhotoButton}
+            onPress={handlePickPhotos}
+            disabled={picking || saving}
+          >
+            <Text style={styles.addPhotoText}>
+              {picking ? '불러오는 중...' : '+ 사진 추가'}
+            </Text>
+          </TouchableOpacity>
+
           <View style={styles.buttonRow}>
             <TouchableOpacity
               style={[styles.button, styles.cancelButton]}
-              onPress={onCancel}
+              onPress={handleCancel}
               disabled={saving}
             >
               <Text style={styles.cancelText}>취소</Text>
@@ -154,6 +204,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
+  },
+  thumbRow: {
+    marginBottom: 4,
+  },
+  thumb: {
+    width: 72,
+    height: 72,
+    borderRadius: 8,
+    marginRight: 8,
+    backgroundColor: '#e5e7eb',
+  },
+  addPhotoButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#eff6ff',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginTop: 8,
+  },
+  addPhotoText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#2563eb',
   },
   buttonRow: {
     flexDirection: 'row',

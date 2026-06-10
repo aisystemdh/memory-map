@@ -7,6 +7,7 @@ import SavePlaceModal from './components/SavePlaceModal';
 import SearchBar from './components/SearchBar';
 import { KakaoPlace } from './lib/kakao';
 import { addPlace, fetchPlaces, Place } from './lib/places';
+import { uploadPhotos, PickedPhoto } from './lib/photos';
 import { useCurrentLocation } from './hooks/useCurrentLocation';
 
 const INITIAL_REGION: Region = {
@@ -110,8 +111,8 @@ export default function App() {
     });
   }
 
-  // 모달에서 저장 누르면 Supabase에 저장
-  async function handleSave(visitedOn: string, memo: string) {
+  // 모달에서 저장 누르면 Supabase에 저장 (+ 고른 사진 업로드)
+  async function handleSave(visitedOn: string, memo: string, photos: PickedPhoto[]) {
     if (!pending) return;
     setSaving(true);
     try {
@@ -126,6 +127,19 @@ export default function App() {
       });
       setPlaces((prev) => [saved, ...prev]);
       setSelectedDate(saved.visited_on);
+
+      // 장소가 저장되어 place_id가 생겼으니 사진을 업로드한다.
+      // 일부 실패해도 장소 저장은 되돌리지 않고, 결과만 알려준다.
+      if (photos.length > 0) {
+        const { success, total } = await uploadPhotos(
+          saved.id,
+          photos.map((p) => p.base64)
+        );
+        if (success < total) {
+          Alert.alert('사진 저장', `사진 ${total}장 중 ${success}장 저장됨`);
+        }
+      }
+
       setPending(null);
     } catch (e) {
       Alert.alert('저장 실패', e instanceof Error ? e.message : '오류가 발생했습니다.');

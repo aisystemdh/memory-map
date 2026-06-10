@@ -9,7 +9,8 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "지도에 현재 위치를 표시하기 위해 위치 권한이 필요합니다."
+        "NSLocationWhenInUseUsageDescription": "지도에 현재 위치를 표시하기 위해 위치 권한이 필요합니다.",
+        "NSPhotoLibraryUsageDescription": "장소에 추억 사진을 첨부하기 위해 사진 보관함 접근 권한이 필요합니다."
       }
     },
     "android": {

@@ -1,5 +1,7 @@
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Place } from '../lib/places';
+import { getPhotoUrl } from '../lib/photos';
+import { usePlacePhotos } from '../hooks/usePlacePhotos';
 
 type Props = {
   // 누른 핀의 장소. null이면 카드 숨김.
@@ -8,6 +10,9 @@ type Props = {
 };
 
 export default function PlaceCard({ place, onClose }: Props) {
+  // 훅은 항상 같은 순서로 호출되어야 하므로 early return 전에 호출한다.
+  const { photos, adding, addPhotos } = usePlacePhotos(place?.id ?? null);
+
   if (!place) return null;
 
   return (
@@ -34,6 +39,32 @@ export default function PlaceCard({ place, onClose }: Props) {
           {place.address}
         </Text>
       ) : null}
+
+      {photos.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.photoRow}
+        >
+          {photos.map((ph) => (
+            <Image
+              key={ph.id}
+              source={{ uri: getPhotoUrl(ph.storage_path) }}
+              style={styles.photo}
+            />
+          ))}
+        </ScrollView>
+      )}
+
+      <TouchableOpacity
+        style={styles.addPhotoButton}
+        onPress={addPhotos}
+        disabled={adding}
+      >
+        <Text style={styles.addPhotoText}>
+          {adding ? '사진 추가 중...' : '+ 사진 추가'}
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -89,5 +120,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#6b7280',
     marginTop: 8,
+  },
+  photoRow: {
+    marginTop: 12,
+  },
+  photo: {
+    width: 96,
+    height: 96,
+    borderRadius: 8,
+    marginRight: 8,
+    backgroundColor: '#e5e7eb',
+  },
+  addPhotoButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#eff6ff',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginTop: 12,
+  },
+  addPhotoText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#2563eb',
   },
 });
