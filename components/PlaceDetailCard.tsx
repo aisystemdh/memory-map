@@ -3,14 +3,14 @@ import { KakaoPlace } from '../lib/kakao';
 import { PlaceStatus } from '../lib/places';
 
 type Props = {
-  // 보여줄 장소 (라벨 마커 탭 / 검색 결과 탭 공용). null이면 카드가 닫힘.
+  // 보여줄 장소 (검색 결과 탭으로 진입). null이면 카드가 닫힘.
   place: KakaoPlace | null;
   // 찜(want) 또는 기록(visited)을 골라 저장 모달로 넘어간다
   onSaveAs: (place: KakaoPlace, status: PlaceStatus) => void;
   onClose: () => void;
 };
 
-// 아직 저장하지 않은 장소의 상세 카드 — 모든 장소 발견 경로(검색·라벨)의 공통 진입점.
+// 아직 저장하지 않은 장소의 상세 카드 — 검색에서 고른 장소의 진입점.
 // 내 저장 핀의 카드(PlaceCard)와는 별개다.
 export default function PlaceDetailCard({ place, onSaveAs, onClose }: Props) {
   if (!place) return null;
