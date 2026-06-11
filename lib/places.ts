@@ -74,16 +74,24 @@ export async function addPlace(place: NewPlace): Promise<Place> {
 }
 
 // 체크인: '가보고 싶은 곳'을 '다녀온 곳'으로 바꾸고 방문 날짜를 오늘로 채운다.
-// status와 visited_on만 갱신하므로 source 등 다른 값은 그대로 보존된다.
-export async function checkInPlace(placeId: string): Promise<{ visited_on: string }> {
+// 메모는 선택사항 — 입력했을 때만 저장한다(비우면 기존 값 유지).
+// status/visited_on(/memo)만 갱신하므로 source 등 다른 값은 그대로 보존된다.
+export async function checkInPlace(
+  placeId: string,
+  memo?: string
+): Promise<{ visited_on: string; memo: string | null }> {
   const visited_on = todayString();
-  const { error } = await supabase
-    .from('places')
-    .update({ status: 'visited', visited_on })
-    .eq('id', placeId);
+  const trimmed = memo?.trim() || '';
+  const update: { status: PlaceStatus; visited_on: string; memo?: string } = {
+    status: 'visited',
+    visited_on,
+  };
+  if (trimmed) update.memo = trimmed;
+
+  const { error } = await supabase.from('places').update(update).eq('id', placeId);
 
   if (error) throw error;
-  return { visited_on };
+  return { visited_on, memo: trimmed || null };
 }
 
 // 저장된 장소의 카테고리만 변경 (null이면 분류 해제)

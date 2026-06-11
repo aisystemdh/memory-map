@@ -63,8 +63,14 @@ export default function SavePlaceModal({ place, saving, categories, onCancel, on
   }
 
   function handleSave() {
-    // 가보고 싶은 곳은 방문 날짜 없이 저장한다
-    onSave(status, status === 'visited' ? toDateString(date) : null, memo.trim(), photos, categoryId);
+    // 가보고 싶은 곳: 방문 날짜 없음 + 메모도 없음 (메모는 체크인 때 받는다)
+    onSave(
+      status,
+      status === 'visited' ? toDateString(date) : null,
+      status === 'visited' ? memo.trim() : '',
+      photos,
+      categoryId
+    );
     reset();
   }
 
@@ -152,14 +158,19 @@ export default function SavePlaceModal({ place, saving, categories, onCancel, on
             </>
           )}
 
-          <Text style={styles.label}>한 줄 메모</Text>
-          <TextInput
-            style={styles.memoInput}
-            placeholder="그날의 추억을 한 줄로 남겨보세요"
-            value={memo}
-            onChangeText={setMemo}
-            maxLength={100}
-          />
+          {/* 메모는 '다녀온 곳'일 때만 — 가보고 싶은 곳은 체크인하는 순간에 묻는다 */}
+          {status === 'visited' && (
+            <>
+              <Text style={styles.label}>한 줄 메모</Text>
+              <TextInput
+                style={styles.memoInput}
+                placeholder="그날의 추억을 한 줄로 남겨보세요"
+                value={memo}
+                onChangeText={setMemo}
+                maxLength={100}
+              />
+            </>
+          )}
 
           <Text style={styles.label}>카테고리</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>

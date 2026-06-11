@@ -178,20 +178,19 @@ export default function App() {
     if (filterCategoryId === id) setFilterCategoryId(null);
   }
 
-  // 체크인: 가보고 싶은 곳 → 다녀온 곳 (방문 날짜 = 오늘). source는 보존된다.
-  async function handleCheckIn(placeId: string) {
+  // 체크인: 가보고 싶은 곳 → 다녀온 곳 (방문 날짜 = 오늘, 메모는 선택). source는 보존된다.
+  async function handleCheckIn(placeId: string, memo: string) {
     try {
-      const { visited_on } = await checkInPlace(placeId);
-      setPlaces((prev) =>
-        prev.map((p) =>
-          p.id === placeId ? { ...p, status: 'visited' as const, visited_on } : p
-        )
-      );
-      setSelectedPlace((prev) =>
-        prev && prev.id === placeId
-          ? { ...prev, status: 'visited' as const, visited_on }
-          : prev
-      );
+      const result = await checkInPlace(placeId, memo);
+      const apply = (p: Place): Place => ({
+        ...p,
+        status: 'visited' as const,
+        visited_on: result.visited_on,
+        // 메모를 입력했을 때만 갱신 (비우면 기존 값 유지)
+        memo: result.memo ?? p.memo,
+      });
+      setPlaces((prev) => prev.map((p) => (p.id === placeId ? apply(p) : p)));
+      setSelectedPlace((prev) => (prev && prev.id === placeId ? apply(prev) : prev));
     } catch (e) {
       Alert.alert('체크인 실패', e instanceof Error ? e.message : '오류가 발생했습니다.');
     }
