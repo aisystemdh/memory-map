@@ -6,6 +6,7 @@ export type KakaoPlace = {
   latitude: number;
   longitude: number;
   category: string;
+  phone: string; // 없으면 빈 문자열
 };
 
 // 카카오 API 원본 응답 중 우리가 쓰는 필드만 표시
@@ -15,24 +16,40 @@ type KakaoDocument = {
   address_name: string;
   road_address_name: string;
   category_group_name: string;
+  phone: string;
   x: string; // 경도(longitude)
   y: string; // 위도(latitude)
 };
 
 const KAKAO_KEYWORD_URL = 'https://dapi.kakao.com/v2/local/search/keyword.json';
 
-export async function searchPlaces(query: string): Promise<KakaoPlace[]> {
-  const keyword = query.trim();
-  if (!keyword) return [];
-
+function getApiKey(): string {
   const apiKey = process.env.EXPO_PUBLIC_KAKAO_REST_API_KEY;
   if (!apiKey) {
     throw new Error('카카오 REST API 키가 없습니다. .env를 확인하세요.');
   }
+  return apiKey;
+}
+
+function toPlace(d: KakaoDocument): KakaoPlace {
+  return {
+    id: d.id,
+    name: d.place_name,
+    address: d.road_address_name || d.address_name,
+    latitude: Number(d.y),
+    longitude: Number(d.x),
+    category: d.category_group_name,
+    phone: d.phone || '',
+  };
+}
+
+export async function searchPlaces(query: string): Promise<KakaoPlace[]> {
+  const keyword = query.trim();
+  if (!keyword) return [];
 
   const url = `${KAKAO_KEYWORD_URL}?query=${encodeURIComponent(keyword)}&size=15`;
   const res = await fetch(url, {
-    headers: { Authorization: `KakaoAK ${apiKey}` },
+    headers: { Authorization: `KakaoAK ${getApiKey()}` },
   });
 
   if (!res.ok) {
@@ -40,12 +57,5 @@ export async function searchPlaces(query: string): Promise<KakaoPlace[]> {
   }
 
   const data: { documents: KakaoDocument[] } = await res.json();
-  return data.documents.map((d) => ({
-    id: d.id,
-    name: d.place_name,
-    address: d.road_address_name || d.address_name,
-    latitude: Number(d.y),
-    longitude: Number(d.x),
-    category: d.category_group_name,
-  }));
+  return data.documents.map(toPlace);
 }

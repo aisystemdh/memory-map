@@ -1,5 +1,16 @@
 import { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Place } from '../lib/places';
 import { getPhotoUrl } from '../lib/photos';
 import { usePlacePhotos } from '../hooks/usePlacePhotos';
@@ -11,16 +22,35 @@ type Props = {
   categories: Category[];
   // 분류 변경 (null = 분류 해제). 실제 저장·상태 갱신은 App이 담당.
   onChangeCategory: (placeId: string, categoryId: string | null) => void;
+  // 체크인: 가보고 싶은 곳 → 다녀온 곳 (+선택 메모). 실제 저장·상태 갱신은 App이 담당.
+  onCheckIn: (placeId: string, memo: string) => void;
   onClose: () => void;
 };
 
-export default function PlaceCard({ place, categories, onChangeCategory, onClose }: Props) {
+export default function PlaceCard({
+  place,
+  categories,
+  onChangeCategory,
+  onCheckIn,
+  onClose,
+}: Props) {
   // 훅은 항상 같은 순서로 호출되어야 하므로 early return 전에 호출한다.
   const { photos, adding, addPhotos } = usePlacePhotos(place?.id ?? null);
   // 분류 선택 줄 열림 여부
   const [pickerOpen, setPickerOpen] = useState(false);
+  // 체크인 메모 입력창 (방문이 확정되는 순간에 메모를 받는다)
+  const [checkInOpen, setCheckInOpen] = useState(false);
+  const [checkInMemo, setCheckInMemo] = useState('');
 
   if (!place) return null;
+
+  // 체크인 확정: 메모는 비워도 된다
+  function confirmCheckIn() {
+    if (!place) return;
+    onCheckIn(place.id, checkInMemo.trim());
+    setCheckInOpen(false);
+    setCheckInMemo('');
+  }
 
   // 현재 분류 (삭제됐거나 미지정이면 '분류 없음' 취급)
   const current = categories.find((c) => c.id === place.category_id) ?? null;
@@ -44,7 +74,13 @@ export default function PlaceCard({ place, categories, onChangeCategory, onClose
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.date}>{place.visited_on}</Text>
+      {place.status === 'visited' ? (
+        <Text style={styles.date}>{place.visited_on}</Text>
+      ) : (
+        <Text style={styles.wantLabel}>
+          {place.status === 'want' ? '가보고 싶은 곳' : '가져온 장소'}
+        </Text>
+      )}
 
       {place.memo ? (
         <Text style={styles.memo}>{place.memo}</Text>
@@ -115,6 +151,56 @@ export default function PlaceCard({ place, categories, onChangeCategory, onClose
           {adding ? '사진 추가 중...' : '+ 사진 추가'}
         </Text>
       </TouchableOpacity>
+
+      {/* 가보고 싶은 곳(또는 가져온 곳)이면 체크인 버튼 — 누르면 메모창이 열린다 */}
+      {place.status !== 'visited' && (
+        <TouchableOpacity style={styles.checkInButton} onPress={() => setCheckInOpen(true)}>
+          <Text style={styles.checkInText}>다녀왔어요 (체크인)</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* 체크인 메모 입력창 — 한 줄, 선택사항 (비워도 체크인 가능) */}
+      <Modal
+        visible={checkInOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setCheckInOpen(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.checkInBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.checkInSheet}>
+            <Text style={styles.checkInTitle}>다녀왔어요!</Text>
+            <Text style={styles.checkInSub}>오늘 날짜로 기록됩니다. 한 줄 메모를 남겨보세요. (선택)</Text>
+            <TextInput
+              style={styles.checkInInput}
+              placeholder="그날의 추억을 한 줄로"
+              value={checkInMemo}
+              onChangeText={setCheckInMemo}
+              maxLength={100}
+              autoFocus
+            />
+            <View style={styles.checkInButtonRow}>
+              <TouchableOpacity
+                style={[styles.checkInRowButton, styles.checkInCancel]}
+                onPress={() => {
+                  setCheckInOpen(false);
+                  setCheckInMemo('');
+                }}
+              >
+                <Text style={styles.checkInCancelText}>취소</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.checkInRowButton, styles.checkInConfirm]}
+                onPress={confirmCheckIn}
+              >
+                <Text style={styles.checkInConfirmText}>체크인</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -155,6 +241,81 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1d4ed8',
     marginTop: 4,
+  },
+  wantLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#9333ea',
+    marginTop: 4,
+  },
+  checkInButton: {
+    backgroundColor: '#16a34a',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  checkInText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  checkInBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  checkInSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 32,
+  },
+  checkInTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  checkInSub: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginTop: 4,
+  },
+  checkInInput: {
+    backgroundColor: '#f3f4f6',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    marginTop: 14,
+  },
+  checkInButtonRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 18,
+  },
+  checkInRowButton: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  checkInCancel: {
+    backgroundColor: '#f3f4f6',
+  },
+  checkInCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  checkInConfirm: {
+    backgroundColor: '#16a34a',
+  },
+  checkInConfirmText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
   memo: {
     fontSize: 15,
