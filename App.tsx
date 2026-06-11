@@ -3,10 +3,13 @@ import { Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } fr
 import MapView, { Marker, Polyline, Region } from 'react-native-maps';
 import CalendarModal from './components/CalendarModal';
 import CategoryModal from './components/CategoryModal';
+import NearbyLabelMarker from './components/NearbyLabelMarker';
 import PlaceCard from './components/PlaceCard';
+import PlaceDetailCard from './components/PlaceDetailCard';
 import PlaceMarker from './components/PlaceMarker';
 import SavePlaceModal from './components/SavePlaceModal';
 import SearchBar from './components/SearchBar';
+import { distanceMeters } from './lib/geo';
 import { KakaoPlace } from './lib/kakao';
 import {
   addPlace,
@@ -20,6 +23,7 @@ import { uploadPhotos, PickedPhoto } from './lib/photos';
 import { routeDate, routeDates, routePlacesOn, RouteStatus } from './lib/routes';
 import { useCurrentLocation } from './hooks/useCurrentLocation';
 import { useCategories } from './hooks/useCategories';
+import { useNearbyPlaces } from './hooks/useNearbyPlaces';
 
 // 보기 상태 — 최상위에서 [루트로 보기] / [카테고리로 보기]로 갈린다.
 // 루트: 가본(visited_on) 또는 가볼(plan_date) 날짜별 동선. 카테고리: 전체 핀 + 분류 필터.
@@ -38,9 +42,15 @@ export default function App() {
   const mapRef = useRef<MapView>(null);
   // Supabase에 저장된 핀들
   const [places, setPlaces] = useState<Place[]>([]);
-  // 검색으로 고른, 아직 저장 전인 장소 (미리보기 핀 + 저장 모달용)
+  // 저장 모달에 띄울, 아직 저장 전인 장소 (미리보기 핀 포함)
   const [pending, setPending] = useState<KakaoPlace | null>(null);
+  // 상세 카드에서 '찜/기록' 중 무엇으로 들어왔는지 — 저장 모달의 기본 상태
+  const [pendingStatus, setPendingStatus] = useState<PlaceStatus>('visited');
   const [saving, setSaving] = useState(false);
+  // 검색 결과·라벨 마커를 탭했을 때 보여줄 장소 상세 카드 (저장 전 장소 공용 진입점)
+  const [detailPlace, setDetailPlace] = useState<KakaoPlace | null>(null);
+  // 지도 멈춤 위치 주변의 카카오 장소 라벨 레이어
+  const { nearby, handleRegionChange } = useNearbyPlaces();
   // 보기 상태 (기본: 루트로 보기 > 가본 곳, 날짜는 핀 로딩 후 최근 방문일로)
   const [view, setView] = useState<ViewState>({
     mode: 'route',
@@ -102,9 +112,10 @@ export default function App() {
     [selectedRoutePlaces]
   );
 
-  // 검색 결과를 선택하면 지도 이동 + 저장 모달 열기
+  // 검색 결과를 선택하면 지도 이동 + 상세 카드 열기 (저장 모달은 카드의 찜/기록 버튼에서)
   function handleSelect(place: KakaoPlace) {
-    setPending(place);
+    setDetailPlace(place);
+    setSelectedPlace(null);
     mapRef.current?.animateToRegion({
       latitude: place.latitude,
       longitude: place.longitude,
@@ -112,6 +123,28 @@ export default function App() {
       longitudeDelta: 0.01,
     });
   }
+
+  // 상세 카드에서 찜(want)/기록(visited)을 고르면 그 상태로 저장 모달을 연다
+  function handleSaveAs(place: KakaoPlace, status: PlaceStatus) {
+    setPendingStatus(status);
+    setPending(place);
+    setDetailPlace(null);
+  }
+
+  // 이미 저장한 장소(kakao id 같음 또는 이름이 같고 50m 이내)는 라벨로 또 띄우지 않는다
+  const nearbyLabels = useMemo(
+    () =>
+      nearby.filter(
+        (n) =>
+          !places.some(
+            (p) =>
+              p.kakao_place_id === n.id ||
+              (p.name === n.name &&
+                distanceMeters(p.latitude, p.longitude, n.latitude, n.longitude) < 50)
+          )
+      ),
+    [nearby, places]
+  );
 
   // 달력에서 날짜를 고르면: 그 날짜의 루트를 강조하고 첫 장소로 지도 이동
   // (달력은 루트 모드에서만 열린다)
@@ -264,7 +297,20 @@ export default function App() {
         style={styles.map}
         initialRegion={INITIAL_REGION}
         showsUserLocation={status === 'granted'}
+        onRegionChangeComplete={handleRegionChange}
       >
+        {/* 주변 장소 라벨 레이어 — 내 저장 핀보다 아래(먼저) 그린다 */}
+        {nearbyLabels.map((n) => (
+          <NearbyLabelMarker
+            key={n.id}
+            place={n}
+            onPress={() => {
+              setDetailPlace(n);
+              setSelectedPlace(null);
+            }}
+          />
+        ))}
+
         {places.map((p) => {
           // 카테고리 보기: 특정 분류만 보기로 했으면 나머지는 숨김 (실선·점선 핀 모두 함께)
           if (
@@ -288,7 +334,10 @@ export default function App() {
                 status: p.status,
               }}
               opacity={dimmed ? 0.3 : 1}
-              onPress={() => setSelectedPlace(p)}
+              onPress={() => {
+                setSelectedPlace(p);
+                setDetailPlace(null);
+              }}
             />
           );
         })}
@@ -373,6 +422,13 @@ export default function App() {
         onClose={() => setSelectedPlace(null)}
       />
 
+      {/* 저장 전 장소의 상세 카드 — 검색 결과 탭·라벨 마커 탭 공용 진입점 */}
+      <PlaceDetailCard
+        place={detailPlace}
+        onSaveAs={handleSaveAs}
+        onClose={() => setDetailPlace(null)}
+      />
+
       <CalendarModal
         visible={calendarVisible}
         recordedDates={calendarDates}
@@ -388,6 +444,7 @@ export default function App() {
 
       <SavePlaceModal
         place={pending}
+        initialStatus={pendingStatus}
         saving={saving}
         categories={categories}
         onCancel={() => setPending(null)}

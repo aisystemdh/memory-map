@@ -1,5 +1,5 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   Image,
@@ -21,6 +21,8 @@ import { PlaceStatus } from '../lib/places';
 type Props = {
   // 저장할 대상 장소. null이면 모달이 닫힘.
   place: KakaoPlace | null;
+  // 상세 카드에서 '찜/기록'으로 고른 상태 — 모달이 열릴 때 기본 선택된다
+  initialStatus: PlaceStatus;
   saving: boolean;
   categories: Category[];
   onCancel: () => void;
@@ -47,6 +49,7 @@ function toDateString(date: Date): string {
 
 export default function SavePlaceModal({
   place,
+  initialStatus,
   saving,
   categories,
   onCancel,
@@ -61,8 +64,12 @@ export default function SavePlaceModal({
   const [picking, setPicking] = useState(false);
   // 선택한 카테고리 (null = 분류 없음)
   const [categoryId, setCategoryId] = useState<string | null>(null);
-  // 다녀온 곳 / 가보고 싶은 곳 (기본: 다녀온 곳)
-  const [status, setStatus] = useState<PlaceStatus>('visited');
+  // 다녀온 곳 / 가보고 싶은 곳 — 상세 카드에서 고른 상태로 시작
+  const [status, setStatus] = useState<PlaceStatus>(initialStatus);
+  // 모달이 새 장소로 열릴 때마다 카드에서 고른 상태를 다시 반영
+  useEffect(() => {
+    if (place) setStatus(initialStatus);
+  }, [place, initialStatus]);
   // 가보고 싶은 곳: 언제 갈지 (null = 날짜 미정) / 누구랑 (선택)
   const [planDate, setPlanDate] = useState<Date | null>(null);
   const [planWith, setPlanWith] = useState('');
