@@ -8,7 +8,14 @@ import PlaceMarker from './components/PlaceMarker';
 import SavePlaceModal from './components/SavePlaceModal';
 import SearchBar from './components/SearchBar';
 import { KakaoPlace } from './lib/kakao';
-import { addPlace, fetchPlaces, updatePlaceCategory, Place } from './lib/places';
+import {
+  addPlace,
+  checkInPlace,
+  fetchPlaces,
+  updatePlaceCategory,
+  Place,
+  PlaceStatus,
+} from './lib/places';
 import { uploadPhotos, PickedPhoto } from './lib/photos';
 import { useCurrentLocation } from './hooks/useCurrentLocation';
 import { useCategories } from './hooks/useCategories';
@@ -60,25 +67,35 @@ export default function App() {
     fetchPlaces()
       .then((rows) => {
         setPlaces(rows);
-        // 가장 최근에 기록한 날짜를 기본 선택해서 동선이 바로 보이게
-        if (rows.length > 0) setSelectedDate(rows[0].visited_on);
+        // 가장 최근에 "다녀온" 장소의 날짜를 기본 선택해서 동선이 바로 보이게
+        // (가보고 싶은 곳은 날짜가 없으므로 제외)
+        const firstVisited = rows.find((r) => r.status === 'visited' && r.visited_on);
+        if (firstVisited) setSelectedDate(firstVisited.visited_on);
       })
       .catch((e) =>
         Alert.alert('불러오기 실패', e instanceof Error ? e.message : '오류가 발생했습니다.')
       );
   }, []);
 
-  // 기록(장소)이 있는 날짜들 (중복 제거) — 달력에 점으로 표시
+  // 기록(다녀온 장소)이 있는 날짜들 (중복 제거) — 달력에 점으로 표시
+  // 동선·달력은 '다녀온 곳'만 대상으로 한다 (가보고 싶은 곳은 제외)
   const recordedDates = useMemo(
-    () => Array.from(new Set(places.map((p) => p.visited_on))),
+    () =>
+      Array.from(
+        new Set(
+          places
+            .filter((p) => p.status === 'visited' && p.visited_on)
+            .map((p) => p.visited_on as string)
+        )
+      ),
     [places]
   );
 
-  // 선택된 날짜의 장소들을 시간순(저장한 순서)으로 정렬
+  // 선택된 날짜의 "다녀온" 장소들을 시간순(저장한 순서)으로 정렬 → 동선용
   const selectedDayPlaces = useMemo(() => {
     if (!selectedDate) return [];
     return places
-      .filter((p) => p.visited_on === selectedDate)
+      .filter((p) => p.status === 'visited' && p.visited_on === selectedDate)
       .sort((a, b) => a.created_at.localeCompare(b.created_at));
   }, [places, selectedDate]);
 
@@ -105,7 +122,7 @@ export default function App() {
     setCalendarVisible(false);
     setSelectedPlace(null);
     const first = places
-      .filter((p) => p.visited_on === date)
+      .filter((p) => p.status === 'visited' && p.visited_on === date)
       .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
     if (first) {
       mapRef.current?.animateToRegion({
@@ -161,9 +178,29 @@ export default function App() {
     if (filterCategoryId === id) setFilterCategoryId(null);
   }
 
+  // 체크인: 가보고 싶은 곳 → 다녀온 곳 (방문 날짜 = 오늘). source는 보존된다.
+  async function handleCheckIn(placeId: string) {
+    try {
+      const { visited_on } = await checkInPlace(placeId);
+      setPlaces((prev) =>
+        prev.map((p) =>
+          p.id === placeId ? { ...p, status: 'visited' as const, visited_on } : p
+        )
+      );
+      setSelectedPlace((prev) =>
+        prev && prev.id === placeId
+          ? { ...prev, status: 'visited' as const, visited_on }
+          : prev
+      );
+    } catch (e) {
+      Alert.alert('체크인 실패', e instanceof Error ? e.message : '오류가 발생했습니다.');
+    }
+  }
+
   // 모달에서 저장 누르면 Supabase에 저장 (+ 고른 사진 업로드)
   async function handleSave(
-    visitedOn: string,
+    status: PlaceStatus,
+    visitedOn: string | null,
     memo: string,
     photos: PickedPhoto[],
     categoryId: string | null
@@ -175,6 +212,7 @@ export default function App() {
         name: pending.name,
         latitude: pending.latitude,
         longitude: pending.longitude,
+        status,
         visited_on: visitedOn,
         memo: memo || null,
         address: pending.address || null,
@@ -182,7 +220,8 @@ export default function App() {
         category_id: categoryId,
       });
       setPlaces((prev) => [saved, ...prev]);
-      setSelectedDate(saved.visited_on);
+      // 다녀온 곳을 저장했으면 그 날짜를 선택해 동선이 바로 보이게
+      if (saved.status === 'visited' && saved.visited_on) setSelectedDate(saved.visited_on);
 
       // 장소가 저장되어 place_id가 생겼으니 사진을 업로드한다.
       // 일부 실패해도 장소 저장은 되돌리지 않고, 결과만 알려준다.
@@ -226,6 +265,7 @@ export default function App() {
               coordinate={{ latitude: p.latitude, longitude: p.longitude }}
               markerStyle={{
                 color: p.category_id ? categoryColorById.get(p.category_id) ?? null : null,
+                status: p.status,
               }}
               opacity={dimmed ? 0.3 : 1}
               onPress={() => setSelectedPlace(p)}
@@ -300,6 +340,7 @@ export default function App() {
         place={selectedPlace}
         categories={categories}
         onChangeCategory={handleChangeCategory}
+        onCheckIn={handleCheckIn}
         onClose={() => setSelectedPlace(null)}
       />
 

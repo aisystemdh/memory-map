@@ -11,10 +11,18 @@ type Props = {
   categories: Category[];
   // 분류 변경 (null = 분류 해제). 실제 저장·상태 갱신은 App이 담당.
   onChangeCategory: (placeId: string, categoryId: string | null) => void;
+  // 체크인: 가보고 싶은 곳 → 다녀온 곳. 실제 저장·상태 갱신은 App이 담당.
+  onCheckIn: (placeId: string) => void;
   onClose: () => void;
 };
 
-export default function PlaceCard({ place, categories, onChangeCategory, onClose }: Props) {
+export default function PlaceCard({
+  place,
+  categories,
+  onChangeCategory,
+  onCheckIn,
+  onClose,
+}: Props) {
   // 훅은 항상 같은 순서로 호출되어야 하므로 early return 전에 호출한다.
   const { photos, adding, addPhotos } = usePlacePhotos(place?.id ?? null);
   // 분류 선택 줄 열림 여부
@@ -44,7 +52,13 @@ export default function PlaceCard({ place, categories, onChangeCategory, onClose
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.date}>{place.visited_on}</Text>
+      {place.status === 'visited' ? (
+        <Text style={styles.date}>{place.visited_on}</Text>
+      ) : (
+        <Text style={styles.wantLabel}>
+          {place.status === 'want' ? '가보고 싶은 곳' : '가져온 장소'}
+        </Text>
+      )}
 
       {place.memo ? (
         <Text style={styles.memo}>{place.memo}</Text>
@@ -115,6 +129,13 @@ export default function PlaceCard({ place, categories, onChangeCategory, onClose
           {adding ? '사진 추가 중...' : '+ 사진 추가'}
         </Text>
       </TouchableOpacity>
+
+      {/* 가보고 싶은 곳(또는 가져온 곳)이면 체크인 버튼 — 누르면 다녀온 곳이 된다 */}
+      {place.status !== 'visited' && (
+        <TouchableOpacity style={styles.checkInButton} onPress={() => onCheckIn(place.id)}>
+          <Text style={styles.checkInText}>다녀왔어요 (체크인)</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -155,6 +176,24 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1d4ed8',
     marginTop: 4,
+  },
+  wantLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#9333ea',
+    marginTop: 4,
+  },
+  checkInButton: {
+    backgroundColor: '#16a34a',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  checkInText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
   },
   memo: {
     fontSize: 15,

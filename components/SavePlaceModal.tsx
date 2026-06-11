@@ -15,6 +15,7 @@ import {
 import { KakaoPlace } from '../lib/kakao';
 import { pickPhotos, PickedPhoto } from '../lib/photos';
 import { Category } from '../lib/categories';
+import { PlaceStatus } from '../lib/places';
 
 type Props = {
   // 저장할 대상 장소. null이면 모달이 닫힘.
@@ -23,7 +24,8 @@ type Props = {
   categories: Category[];
   onCancel: () => void;
   onSave: (
-    visitedOn: string,
+    status: PlaceStatus,
+    visitedOn: string | null, // 다녀온 곳이면 날짜, 가보고 싶은 곳이면 null
     memo: string,
     photos: PickedPhoto[],
     categoryId: string | null
@@ -47,6 +49,8 @@ export default function SavePlaceModal({ place, saving, categories, onCancel, on
   const [picking, setPicking] = useState(false);
   // 선택한 카테고리 (null = 분류 없음)
   const [categoryId, setCategoryId] = useState<string | null>(null);
+  // 다녀온 곳 / 가보고 싶은 곳 (기본: 다녀온 곳)
+  const [status, setStatus] = useState<PlaceStatus>('visited');
 
   // 다음 저장을 위해 입력값 초기화
   function reset() {
@@ -55,10 +59,12 @@ export default function SavePlaceModal({ place, saving, categories, onCancel, on
     setShowPicker(Platform.OS === 'ios');
     setPhotos([]);
     setCategoryId(null);
+    setStatus('visited');
   }
 
   function handleSave() {
-    onSave(toDateString(date), memo.trim(), photos, categoryId);
+    // 가보고 싶은 곳은 방문 날짜 없이 저장한다
+    onSave(status, status === 'visited' ? toDateString(date) : null, memo.trim(), photos, categoryId);
     reset();
   }
 
@@ -97,26 +103,53 @@ export default function SavePlaceModal({ place, saving, categories, onCancel, on
             <Text style={styles.address}>{place.address}</Text>
           ) : null}
 
-          <Text style={styles.label}>날짜</Text>
-          {Platform.OS === 'android' && (
+          <Text style={styles.label}>상태</Text>
+          <View style={styles.statusRow}>
             <TouchableOpacity
-              style={styles.dateButton}
-              onPress={() => setShowPicker(true)}
+              style={[styles.statusButton, status === 'visited' && styles.statusButtonSelected]}
+              onPress={() => setStatus('visited')}
             >
-              <Text style={styles.dateButtonText}>{toDateString(date)}</Text>
+              <Text
+                style={[styles.statusText, status === 'visited' && styles.statusTextSelected]}
+              >
+                다녀온 곳
+              </Text>
             </TouchableOpacity>
-          )}
-          {showPicker && (
-            <DateTimePicker
-              value={date}
-              mode="date"
-              display="default"
-              maximumDate={new Date()}
-              onChange={(event, selected) => {
-                if (Platform.OS === 'android') setShowPicker(false);
-                if (event.type === 'set' && selected) setDate(selected);
-              }}
-            />
+            <TouchableOpacity
+              style={[styles.statusButton, status === 'want' && styles.statusButtonSelected]}
+              onPress={() => setStatus('want')}
+            >
+              <Text style={[styles.statusText, status === 'want' && styles.statusTextSelected]}>
+                가보고 싶은 곳
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* 방문 날짜는 '다녀온 곳'일 때만 입력 */}
+          {status === 'visited' && (
+            <>
+              <Text style={styles.label}>날짜</Text>
+              {Platform.OS === 'android' && (
+                <TouchableOpacity
+                  style={styles.dateButton}
+                  onPress={() => setShowPicker(true)}
+                >
+                  <Text style={styles.dateButtonText}>{toDateString(date)}</Text>
+                </TouchableOpacity>
+              )}
+              {showPicker && (
+                <DateTimePicker
+                  value={date}
+                  mode="date"
+                  display="default"
+                  maximumDate={new Date()}
+                  onChange={(event, selected) => {
+                    if (Platform.OS === 'android') setShowPicker(false);
+                    if (event.type === 'set' && selected) setDate(selected);
+                  }}
+                />
+              )}
+            </>
           )}
 
           <Text style={styles.label}>한 줄 메모</Text>
@@ -221,6 +254,30 @@ const styles = StyleSheet.create({
     color: '#374151',
     marginTop: 18,
     marginBottom: 8,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  statusButton: {
+    flex: 1,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  statusButtonSelected: {
+    backgroundColor: '#dbeafe',
+    borderWidth: 1.5,
+    borderColor: '#2563eb',
+  },
+  statusText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#6b7280',
+  },
+  statusTextSelected: {
+    color: '#1d4ed8',
   },
   dateButton: {
     backgroundColor: '#f3f4f6',
