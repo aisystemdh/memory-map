@@ -11,25 +11,13 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Category } from '../lib/categories';
-
-// 추천 팔레트 8색
-const PALETTE = [
-  '#ef4444', // 빨강
-  '#f97316', // 주황
-  '#eab308', // 노랑
-  '#22c55e', // 초록
-  '#06b6d4', // 청록
-  '#3b82f6', // 파랑
-  '#8b5cf6', // 보라
-  '#ec4899', // 분홍
-];
+import { Category, CATEGORY_PALETTE as PALETTE } from '../lib/categories';
 
 type Props = {
   visible: boolean;
   categories: Category[];
-  // 성공 여부를 돌려받아 입력칸 초기화 여부를 정한다.
-  onAdd: (name: string, color: string) => Promise<boolean>;
+  // 만든 카테고리(실패 시 null)를 돌려받아 입력칸 초기화 여부를 정한다.
+  onAdd: (name: string, color: string) => Promise<Category | null>;
   onRemove: (id: string) => void;
   onClose: () => void;
 };

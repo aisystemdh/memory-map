@@ -392,6 +392,7 @@ export default function App() {
         categories={categories}
         onCancel={() => setPending(null)}
         onSave={handleSave}
+        onCreateCategory={addCategoryItem}
       />
 
       <CategoryModal
