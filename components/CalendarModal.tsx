@@ -8,6 +8,8 @@ type Props = {
   recordedDates: string[];
   // 현재 선택된 날짜
   selectedDate: string | null;
+  // 점 표시가 무엇을 뜻하는지 안내 문구 (가본/가볼 루트에 따라 다르게)
+  hint?: string;
   onSelectDate: (date: string) => void;
   onClose: () => void;
 };
@@ -18,6 +20,7 @@ export default function CalendarModal({
   visible,
   recordedDates,
   selectedDate,
+  hint = '점이 있는 날에 기록한 장소가 있어요.',
   onSelectDate,
   onClose,
 }: Props) {
@@ -48,7 +51,7 @@ export default function CalendarModal({
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.hint}>점이 있는 날에 기록한 장소가 있어요.</Text>
+          <Text style={styles.hint}>{hint}</Text>
 
           <Calendar
             markedDates={markedDates}

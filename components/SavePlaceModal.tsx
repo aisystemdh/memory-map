@@ -28,7 +28,9 @@ type Props = {
     visitedOn: string | null, // 다녀온 곳이면 날짜, 가보고 싶은 곳이면 null
     memo: string,
     photos: PickedPhoto[],
-    categoryId: string | null
+    categoryId: string | null,
+    planDate: string | null, // 가보고 싶은 곳의 계획일 (미정이면 null)
+    planWith: string | null // 가보고 싶은 곳의 동행 (선택)
   ) => void;
 };
 
@@ -51,6 +53,10 @@ export default function SavePlaceModal({ place, saving, categories, onCancel, on
   const [categoryId, setCategoryId] = useState<string | null>(null);
   // 다녀온 곳 / 가보고 싶은 곳 (기본: 다녀온 곳)
   const [status, setStatus] = useState<PlaceStatus>('visited');
+  // 가보고 싶은 곳: 언제 갈지 (null = 날짜 미정) / 누구랑 (선택)
+  const [planDate, setPlanDate] = useState<Date | null>(null);
+  const [planWith, setPlanWith] = useState('');
+  const [showPlanPicker, setShowPlanPicker] = useState(false);
 
   // 다음 저장을 위해 입력값 초기화
   function reset() {
@@ -60,16 +66,21 @@ export default function SavePlaceModal({ place, saving, categories, onCancel, on
     setPhotos([]);
     setCategoryId(null);
     setStatus('visited');
+    setPlanDate(null);
+    setPlanWith('');
+    setShowPlanPicker(false);
   }
 
   function handleSave() {
-    // 가보고 싶은 곳: 방문 날짜 없음 + 메모도 없음 (메모는 체크인 때 받는다)
+    // 가보고 싶은 곳: 방문 날짜·메모 없음(메모는 체크인 때), 대신 계획일·동행을 저장
     onSave(
       status,
       status === 'visited' ? toDateString(date) : null,
       status === 'visited' ? memo.trim() : '',
       photos,
-      categoryId
+      categoryId,
+      status === 'want' && planDate ? toDateString(planDate) : null,
+      status === 'want' ? planWith.trim() || null : null
     );
     reset();
   }
@@ -155,6 +166,54 @@ export default function SavePlaceModal({ place, saving, categories, onCancel, on
                   }}
                 />
               )}
+            </>
+          )}
+
+          {/* 가보고 싶은 곳: 계획일(미정 가능)과 동행을 입력 */}
+          {status === 'want' && (
+            <>
+              <Text style={styles.label}>언제 갈지 (선택)</Text>
+              <View style={styles.planDateRow}>
+                <TouchableOpacity
+                  style={styles.dateButton}
+                  onPress={() => setShowPlanPicker(true)}
+                >
+                  <Text style={styles.dateButtonText}>
+                    {planDate ? toDateString(planDate) : '날짜 미정'}
+                  </Text>
+                </TouchableOpacity>
+                {planDate && (
+                  <TouchableOpacity
+                    style={styles.planClearButton}
+                    onPress={() => {
+                      setPlanDate(null);
+                      setShowPlanPicker(false);
+                    }}
+                  >
+                    <Text style={styles.planClearText}>미정으로</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {showPlanPicker && (
+                <DateTimePicker
+                  value={planDate ?? new Date()}
+                  mode="date"
+                  display="default"
+                  onChange={(event, selected) => {
+                    if (Platform.OS === 'android') setShowPlanPicker(false);
+                    if (event.type === 'set' && selected) setPlanDate(selected);
+                  }}
+                />
+              )}
+
+              <Text style={styles.label}>누구랑 (선택)</Text>
+              <TextInput
+                style={styles.memoInput}
+                placeholder="같이 갈 사람을 적어보세요"
+                value={planWith}
+                onChangeText={setPlanWith}
+                maxLength={50}
+              />
             </>
           )}
 
@@ -300,6 +359,20 @@ const styles = StyleSheet.create({
   dateButtonText: {
     fontSize: 16,
     color: '#111827',
+  },
+  planDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  planClearButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  planClearText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6b7280',
   },
   memoInput: {
     backgroundColor: '#f3f4f6',

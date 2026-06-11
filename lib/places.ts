@@ -11,6 +11,8 @@ export type Place = {
   longitude: number;
   status: PlaceStatus;
   visited_on: string | null; // YYYY-MM-DD. visited면 필수, want/imported면 NULL
+  plan_date: string | null; // YYYY-MM-DD. want의 계획일 (미정이면 NULL → 루트엔 안 들어감)
+  plan_with: string | null; // 누구랑 갈지 (선택). 나중에 친구 연동으로 확장 예정.
   memo: string | null;
   address: string | null;
   kakao_place_id: string | null;
@@ -26,6 +28,8 @@ export type NewPlace = {
   longitude: number;
   status: PlaceStatus;
   visited_on: string | null;
+  plan_date: string | null;
+  plan_with: string | null;
   memo: string | null;
   address: string | null;
   kakao_place_id: string | null;
@@ -33,7 +37,7 @@ export type NewPlace = {
 };
 
 const PLACE_COLUMNS =
-  'id, name, latitude, longitude, status, visited_on, memo, address, kakao_place_id, category_id, source, created_at';
+  'id, name, latitude, longitude, status, visited_on, plan_date, plan_with, memo, address, kakao_place_id, category_id, source, created_at';
 
 // 저장된 모든 핀 불러오기 (최신순)
 export async function fetchPlaces(): Promise<Place[]> {
@@ -57,11 +61,14 @@ export function todayString(): string {
 
 // 새 장소 한 건 저장하고, 저장된 결과를 돌려줌
 export async function addPlace(place: NewPlace): Promise<Place> {
-  // 데이터 일관성 규칙: visited면 날짜 필수, want면 날짜 없음
+  // 데이터 일관성 규칙: visited는 visited_on 사용(필수), want는 plan_date 사용(선택)
   if (place.status === 'visited' && !place.visited_on) {
     throw new Error('다녀온 곳은 방문 날짜가 필요합니다.');
   }
-  const row = place.status === 'visited' ? place : { ...place, visited_on: null };
+  const row: NewPlace =
+    place.status === 'visited'
+      ? { ...place, plan_date: null, plan_with: null }
+      : { ...place, visited_on: null };
 
   const { data, error } = await supabase
     .from('places')
