@@ -6,10 +6,10 @@ import { supabase } from './supabase';
 // Public Storage 버킷 이름 (이미 만들어져 있다고 전제)
 const BUCKET = 'place-photos';
 
-// place_photos 테이블의 사진 한 건
-export type PlacePhoto = {
+// visit_photos 테이블의 사진 한 건 — 사진은 "방문(visit)"에 속한다.
+export type VisitPhoto = {
   id: string;
-  place_id: string;
+  visit_id: string;
   storage_path: string;
   created_at: string;
 };
@@ -22,7 +22,7 @@ export type PickedPhoto = {
 
 // 여러 장 업로드 결과 요약
 export type UploadResult = {
-  uploaded: PlacePhoto[]; // 실제로 저장된 행들
+  uploaded: VisitPhoto[]; // 실제로 저장된 행들
   success: number; // 성공 장수
   total: number; // 시도한 전체 장수
 };
@@ -66,11 +66,11 @@ function uniqueName(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.jpg`;
 }
 
-// 사진 한 장을 Storage에 올리고 place_photos에 행을 남긴다.
-// 경로 형태: {place_id}/{고유파일명}.jpg
+// 사진 한 장을 Storage에 올리고 visit_photos에 행을 남긴다.
+// 경로 형태: {visit_id}/{고유파일명}.jpg  (RLS·Storage 정책이 이 경로를 기대한다)
 // 실패하면 throw (호출하는 쪽에서 부분 실패를 집계한다).
-export async function uploadPhoto(placeId: string, base64: string): Promise<PlacePhoto> {
-  const path = `${placeId}/${uniqueName()}`;
+export async function uploadPhoto(visitId: string, base64: string): Promise<VisitPhoto> {
+  const path = `${visitId}/${uniqueName()}`;
   // base64 → ArrayBuffer (fetch/blob·FormData는 Expo에서 0바이트 버그가 있어 쓰지 않음)
   const arrayBuffer = decode(base64);
 
@@ -80,20 +80,20 @@ export async function uploadPhoto(placeId: string, base64: string): Promise<Plac
   if (uploadError) throw uploadError;
 
   const { data, error } = await supabase
-    .from('place_photos')
-    .insert({ place_id: placeId, storage_path: path })
-    .select('id, place_id, storage_path, created_at')
+    .from('visit_photos')
+    .insert({ visit_id: visitId, storage_path: path })
+    .select('id, visit_id, storage_path, created_at')
     .single();
   if (error) throw error;
-  return data as PlacePhoto;
+  return data as VisitPhoto;
 }
 
-// 여러 장 업로드. 일부가 실패해도 성공한 것은 유지한다.
-export async function uploadPhotos(placeId: string, base64List: string[]): Promise<UploadResult> {
-  const uploaded: PlacePhoto[] = [];
+// 한 방문에 여러 장 업로드. 일부가 실패해도 성공한 것은 유지한다.
+export async function uploadPhotos(visitId: string, base64List: string[]): Promise<UploadResult> {
+  const uploaded: VisitPhoto[] = [];
   for (const base64 of base64List) {
     try {
-      uploaded.push(await uploadPhoto(placeId, base64));
+      uploaded.push(await uploadPhoto(visitId, base64));
     } catch {
       // 이 한 장만 실패 → 건너뛴다 (나머지는 계속 시도)
     }
@@ -101,15 +101,24 @@ export async function uploadPhotos(placeId: string, base64List: string[]): Promi
   return { uploaded, success: uploaded.length, total: base64List.length };
 }
 
-// 한 장소의 사진들 조회 (오래된 순)
-export async function fetchPhotos(placeId: string): Promise<PlacePhoto[]> {
+// 여러 방문의 사진을 한 번에 조회 (카드의 방문 슬라이드용). 오래된 순.
+// visit_id별로 묶어서 돌려준다.
+export async function fetchPhotosByVisits(
+  visitIds: string[]
+): Promise<Record<string, VisitPhoto[]>> {
+  if (visitIds.length === 0) return {};
   const { data, error } = await supabase
-    .from('place_photos')
-    .select('id, place_id, storage_path, created_at')
-    .eq('place_id', placeId)
+    .from('visit_photos')
+    .select('id, visit_id, storage_path, created_at')
+    .in('visit_id', visitIds)
     .order('created_at', { ascending: true });
   if (error) throw error;
-  return (data ?? []) as PlacePhoto[];
+
+  const byVisit: Record<string, VisitPhoto[]> = {};
+  for (const row of (data ?? []) as VisitPhoto[]) {
+    (byVisit[row.visit_id] ??= []).push(row);
+  }
+  return byVisit;
 }
 
 // storage_path → 화면 표시용 공개 URL

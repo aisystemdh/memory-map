@@ -366,27 +366,32 @@ export default function SavePlaceModal({
             </View>
           )}
 
-          <Text style={styles.label}>사진</Text>
-          {photos.length > 0 && (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.thumbRow}
-            >
-              {photos.map((p, i) => (
-                <Image key={i} source={{ uri: p.uri }} style={styles.thumb} />
-              ))}
-            </ScrollView>
+          {/* 사진은 '다녀온 곳'일 때만 — 첫 방문(visit)에 붙는다. 가볼 곳은 방문이 없어 생략. */}
+          {status === 'visited' && (
+            <>
+              <Text style={styles.label}>사진</Text>
+              {photos.length > 0 && (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.thumbRow}
+                >
+                  {photos.map((p, i) => (
+                    <Image key={i} source={{ uri: p.uri }} style={styles.thumb} />
+                  ))}
+                </ScrollView>
+              )}
+              <TouchableOpacity
+                style={styles.addPhotoButton}
+                onPress={handlePickPhotos}
+                disabled={picking || saving}
+              >
+                <Text style={styles.addPhotoText}>
+                  {picking ? '불러오는 중...' : '+ 사진 추가'}
+                </Text>
+              </TouchableOpacity>
+            </>
           )}
-          <TouchableOpacity
-            style={styles.addPhotoButton}
-            onPress={handlePickPhotos}
-            disabled={picking || saving}
-          >
-            <Text style={styles.addPhotoText}>
-              {picking ? '불러오는 중...' : '+ 사진 추가'}
-            </Text>
-          </TouchableOpacity>
 
           <View style={styles.buttonRow}>
             <TouchableOpacity

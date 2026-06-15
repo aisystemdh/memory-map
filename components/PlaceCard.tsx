@@ -1,56 +1,78 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Image,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Place } from '../lib/places';
-import { getPhotoUrl } from '../lib/photos';
-import { usePlacePhotos } from '../hooks/usePlacePhotos';
+import { Visit } from '../lib/visits';
+import {
+  fetchPhotosByVisits,
+  getPhotoUrl,
+  pickPhotos,
+  uploadPhotos,
+  VisitPhoto,
+} from '../lib/photos';
 import { Category } from '../lib/categories';
 
 type Props = {
   // 누른 핀의 장소. null이면 카드 숨김.
   place: Place | null;
+  // 이 장소의 방문들 (최근 방문 먼저). want/imported면 빈 배열.
+  visits: Visit[];
   categories: Category[];
   // 분류 변경 (null = 분류 해제). 실제 저장·상태 갱신은 App이 담당.
   onChangeCategory: (placeId: string, categoryId: string | null) => void;
-  // 체크인: 가보고 싶은 곳 → 다녀온 곳 (+선택 메모). 실제 저장·상태 갱신은 App이 담당.
-  onCheckIn: (placeId: string, memo: string) => void;
+  // 방문 추가/체크인 시트 열기 요청 (실제 저장은 App이 담당).
+  onRequestAddVisit: (place: Place) => void;
   onClose: () => void;
 };
 
 export default function PlaceCard({
   place,
+  visits,
   categories,
   onChangeCategory,
-  onCheckIn,
+  onRequestAddVisit,
   onClose,
 }: Props) {
-  // 훅은 항상 같은 순서로 호출되어야 하므로 early return 전에 호출한다.
-  const { photos, adding, addPhotos } = usePlacePhotos(place?.id ?? null);
+  const { width } = useWindowDimensions();
+  // 카드 내부 폭(좌우 카드 마진 12*2 + 패딩 16*2) — 방문 슬라이드 한 장 폭
+  const slideWidth = width - 24 - 32;
+
+  // 방문별 사진 (visit_id → 사진들). 카드 열릴 때 한 번에 불러온다.
+  const [photosByVisit, setPhotosByVisit] = useState<Record<string, VisitPhoto[]>>({});
   // 분류 선택 줄 열림 여부
   const [pickerOpen, setPickerOpen] = useState(false);
-  // 체크인 메모 입력창 (방문이 확정되는 순간에 메모를 받는다)
-  const [checkInOpen, setCheckInOpen] = useState(false);
-  const [checkInMemo, setCheckInMemo] = useState('');
+  // 사진 추가 중인 방문 id (버튼 비활성화용)
+  const [addingTo, setAddingTo] = useState<string | null>(null);
+
+  // 훅은 early return 전에 호출. 방문 목록이 바뀌면 사진을 다시 불러온다.
+  const visitIdsKey = visits.map((v) => v.id).join(',');
+  useEffect(() => {
+    const ids = visitIdsKey ? visitIdsKey.split(',') : [];
+    if (ids.length === 0) {
+      setPhotosByVisit({});
+      return;
+    }
+    let active = true;
+    fetchPhotosByVisits(ids)
+      .then((map) => {
+        if (active) setPhotosByVisit(map);
+      })
+      .catch(() => {
+        // 사진 조회 실패해도 카드는 그대로 동작
+      });
+    return () => {
+      active = false;
+    };
+  }, [visitIdsKey]);
 
   if (!place) return null;
-
-  // 체크인 확정: 메모는 비워도 된다
-  function confirmCheckIn() {
-    if (!place) return;
-    onCheckIn(place.id, checkInMemo.trim());
-    setCheckInOpen(false);
-    setCheckInMemo('');
-  }
 
   // 현재 분류 (삭제됐거나 미지정이면 '분류 없음' 취급)
   const current = categories.find((c) => c.id === place.category_id) ?? null;
@@ -63,6 +85,29 @@ export default function PlaceCard({
     }
   }
 
+  // 특정 방문에 사진 추가
+  async function handleAddPhoto(visitId: string) {
+    setAddingTo(visitId);
+    try {
+      const picked = await pickPhotos();
+      if (picked.length === 0) return;
+      const { uploaded } = await uploadPhotos(
+        visitId,
+        picked.map((p) => p.base64)
+      );
+      if (uploaded.length > 0) {
+        setPhotosByVisit((prev) => ({
+          ...prev,
+          [visitId]: [...(prev[visitId] ?? []), ...uploaded],
+        }));
+      }
+    } finally {
+      setAddingTo(null);
+    }
+  }
+
+  const isVisited = place.status === 'visited';
+
   return (
     <View style={styles.card}>
       <View style={styles.header}>
@@ -74,20 +119,6 @@ export default function PlaceCard({
         </TouchableOpacity>
       </View>
 
-      {place.status === 'visited' ? (
-        <Text style={styles.date}>{place.visited_on}</Text>
-      ) : (
-        <Text style={styles.wantLabel}>
-          {place.status === 'want' ? '가보고 싶은 곳' : '가져온 장소'}
-        </Text>
-      )}
-
-      {place.memo ? (
-        <Text style={styles.memo}>{place.memo}</Text>
-      ) : (
-        <Text style={styles.memoEmpty}>메모 없음</Text>
-      )}
-
       {place.address ? (
         <Text style={styles.address} numberOfLines={1}>
           {place.address}
@@ -95,14 +126,9 @@ export default function PlaceCard({
       ) : null}
 
       {/* 현재 분류 표시 — 누르면 변경 줄이 열린다 */}
-      <TouchableOpacity
-        style={styles.categoryChip}
-        onPress={() => setPickerOpen((v) => !v)}
-      >
+      <TouchableOpacity style={styles.categoryChip} onPress={() => setPickerOpen((v) => !v)}>
         {current && <View style={[styles.chipDot, { backgroundColor: current.color }]} />}
-        <Text style={styles.categoryChipText}>
-          {current ? current.name : '분류 없음'} ▾
-        </Text>
+        <Text style={styles.categoryChipText}>{current ? current.name : '분류 없음'} ▾</Text>
       </TouchableOpacity>
 
       {pickerOpen && (
@@ -126,81 +152,75 @@ export default function PlaceCard({
         </ScrollView>
       )}
 
-      {photos.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.photoRow}
-        >
-          {photos.map((ph) => (
-            <Image
-              key={ph.id}
-              source={{ uri: getPhotoUrl(ph.storage_path) }}
-              style={styles.photo}
-            />
-          ))}
-        </ScrollView>
+      {isVisited ? (
+        <>
+          {/* 방문 슬라이드 — 한 장 = 방문 1건(날짜·메모·사진). 최근 방문이 먼저. */}
+          <ScrollView
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            style={styles.slides}
+          >
+            {visits.map((v) => (
+              <View key={v.id} style={[styles.slide, { width: slideWidth }]}>
+                <Text style={styles.visitDate}>{v.visited_on}</Text>
+                {v.memo ? (
+                  <Text style={styles.visitMemo}>{v.memo}</Text>
+                ) : (
+                  <Text style={styles.visitMemoEmpty}>메모 없음</Text>
+                )}
+
+                {(photosByVisit[v.id]?.length ?? 0) > 0 && (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoRow}>
+                    {photosByVisit[v.id].map((ph) => (
+                      <Image
+                        key={ph.id}
+                        source={{ uri: getPhotoUrl(ph.storage_path) }}
+                        style={styles.photo}
+                      />
+                    ))}
+                  </ScrollView>
+                )}
+
+                <TouchableOpacity
+                  style={styles.addPhotoButton}
+                  onPress={() => handleAddPhoto(v.id)}
+                  disabled={addingTo === v.id}
+                >
+                  <Text style={styles.addPhotoText}>
+                    {addingTo === v.id ? '사진 추가 중...' : '+ 이 방문에 사진'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </ScrollView>
+
+          {visits.length > 1 && (
+            <Text style={styles.slideHint}>← {visits.length}번의 방문 (옆으로 넘기기) →</Text>
+          )}
+
+          <TouchableOpacity style={styles.addVisitButton} onPress={() => onRequestAddVisit(place)}>
+            <Text style={styles.addVisitText}>+ 방문 추가</Text>
+          </TouchableOpacity>
+        </>
+      ) : (
+        <>
+          {/* 가보고 싶은 곳 / 가져온 곳 — 계획 정보 + 체크인 */}
+          <Text style={styles.wantLabel}>
+            {place.status === 'want' ? '가보고 싶은 곳' : '가져온 장소'}
+          </Text>
+          {place.plan_date ? (
+            <Text style={styles.planText}>계획일: {place.plan_date}</Text>
+          ) : (
+            <Text style={styles.planTextMuted}>계획일 미정</Text>
+          )}
+          {place.plan_with ? <Text style={styles.planText}>함께: {place.plan_with}</Text> : null}
+
+          <TouchableOpacity style={styles.checkInButton} onPress={() => onRequestAddVisit(place)}>
+            <Text style={styles.checkInText}>다녀왔어요 (체크인)</Text>
+          </TouchableOpacity>
+        </>
       )}
-
-      <TouchableOpacity
-        style={styles.addPhotoButton}
-        onPress={addPhotos}
-        disabled={adding}
-      >
-        <Text style={styles.addPhotoText}>
-          {adding ? '사진 추가 중...' : '+ 사진 추가'}
-        </Text>
-      </TouchableOpacity>
-
-      {/* 가보고 싶은 곳(또는 가져온 곳)이면 체크인 버튼 — 누르면 메모창이 열린다 */}
-      {place.status !== 'visited' && (
-        <TouchableOpacity style={styles.checkInButton} onPress={() => setCheckInOpen(true)}>
-          <Text style={styles.checkInText}>다녀왔어요 (체크인)</Text>
-        </TouchableOpacity>
-      )}
-
-      {/* 체크인 메모 입력창 — 한 줄, 선택사항 (비워도 체크인 가능) */}
-      <Modal
-        visible={checkInOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setCheckInOpen(false)}
-      >
-        <KeyboardAvoidingView
-          style={styles.checkInBackdrop}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          <View style={styles.checkInSheet}>
-            <Text style={styles.checkInTitle}>다녀왔어요!</Text>
-            <Text style={styles.checkInSub}>오늘 날짜로 기록됩니다. 한 줄 메모를 남겨보세요. (선택)</Text>
-            <TextInput
-              style={styles.checkInInput}
-              placeholder="그날의 추억을 한 줄로"
-              value={checkInMemo}
-              onChangeText={setCheckInMemo}
-              maxLength={100}
-              autoFocus
-            />
-            <View style={styles.checkInButtonRow}>
-              <TouchableOpacity
-                style={[styles.checkInRowButton, styles.checkInCancel]}
-                onPress={() => {
-                  setCheckInOpen(false);
-                  setCheckInMemo('');
-                }}
-              >
-                <Text style={styles.checkInCancelText}>취소</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.checkInRowButton, styles.checkInConfirm]}
-                onPress={confirmCheckIn}
-              >
-                <Text style={styles.checkInConfirmText}>체크인</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
     </View>
   );
 }
@@ -236,101 +256,10 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     paddingHorizontal: 6,
   },
-  date: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1d4ed8',
-    marginTop: 4,
-  },
-  wantLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#9333ea',
-    marginTop: 4,
-  },
-  checkInButton: {
-    backgroundColor: '#16a34a',
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  checkInText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  checkInBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
-  checkInSheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    paddingBottom: 32,
-  },
-  checkInTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  checkInSub: {
-    fontSize: 14,
-    color: '#6b7280',
-    marginTop: 4,
-  },
-  checkInInput: {
-    backgroundColor: '#f3f4f6',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    marginTop: 14,
-  },
-  checkInButtonRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 18,
-  },
-  checkInRowButton: {
-    flex: 1,
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  checkInCancel: {
-    backgroundColor: '#f3f4f6',
-  },
-  checkInCancelText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  checkInConfirm: {
-    backgroundColor: '#16a34a',
-  },
-  checkInConfirmText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  memo: {
-    fontSize: 15,
-    color: '#374151',
-    marginTop: 8,
-  },
-  memoEmpty: {
-    fontSize: 15,
-    color: '#9ca3af',
-    marginTop: 8,
-  },
   address: {
     fontSize: 13,
     color: '#6b7280',
-    marginTop: 8,
+    marginTop: 4,
   },
   categoryChip: {
     flexDirection: 'row',
@@ -375,8 +304,29 @@ const styles = StyleSheet.create({
     color: '#374151',
     fontWeight: '600',
   },
-  photoRow: {
+  slides: {
     marginTop: 12,
+  },
+  slide: {
+    paddingRight: 12,
+  },
+  visitDate: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1d4ed8',
+  },
+  visitMemo: {
+    fontSize: 15,
+    color: '#374151',
+    marginTop: 6,
+  },
+  visitMemoEmpty: {
+    fontSize: 15,
+    color: '#9ca3af',
+    marginTop: 6,
+  },
+  photoRow: {
+    marginTop: 10,
   },
   photo: {
     width: 96,
@@ -391,11 +341,57 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    marginTop: 12,
+    marginTop: 10,
   },
   addPhotoText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     color: '#2563eb',
+  },
+  slideHint: {
+    fontSize: 12,
+    color: '#9ca3af',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  addVisitButton: {
+    backgroundColor: '#1d4ed8',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  addVisitText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  wantLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#9333ea',
+    marginTop: 10,
+  },
+  planText: {
+    fontSize: 15,
+    color: '#374151',
+    marginTop: 6,
+  },
+  planTextMuted: {
+    fontSize: 15,
+    color: '#9ca3af',
+    marginTop: 6,
+  },
+  checkInButton: {
+    backgroundColor: '#16a34a',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  checkInText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
   },
 });

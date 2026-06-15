@@ -1,0 +1,41 @@
+import { supabase } from './supabase';
+
+// 한 장소의 방문 1건. 한 place에 여러 visit이 매달릴 수 있다.
+// 방문일·메모는 여기에 있다(places에는 없다). user_id 컬럼은 없고,
+// RLS가 "부모 place가 본인 것일 때만"으로 접근을 제어한다.
+export type Visit = {
+  id: string;
+  place_id: string;
+  visited_on: string; // YYYY-MM-DD (NOT NULL)
+  memo: string | null;
+  created_at: string;
+};
+
+const VISIT_COLUMNS = 'id, place_id, visited_on, memo, created_at';
+
+// 내 모든 방문 — 최근 방문일 먼저(visited_on 내림차순, 같은 날은 created_at 내림차순).
+// 동선·달력·카드 슬라이드·목록 정렬이 전부 이 목록에서 파생된다.
+export async function fetchAllVisits(): Promise<Visit[]> {
+  const { data, error } = await supabase
+    .from('visits')
+    .select(VISIT_COLUMNS)
+    .order('visited_on', { ascending: false })
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as Visit[];
+}
+
+// 한 장소에 방문 한 건 추가. 사진은 호출부가 돌려받은 visit.id로 따로 올린다.
+export async function addVisit(
+  placeId: string,
+  visitedOn: string,
+  memo: string
+): Promise<Visit> {
+  const { data, error } = await supabase
+    .from('visits')
+    .insert({ place_id: placeId, visited_on: visitedOn, memo: memo.trim() || null })
+    .select(VISIT_COLUMNS)
+    .single();
+  if (error) throw error;
+  return data as Visit;
+}

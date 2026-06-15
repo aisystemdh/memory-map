@@ -4,41 +4,42 @@ import { getCurrentUserId } from './currentUser';
 // 장소 상태: 가본 곳 / 가보고 싶은 곳 / 가져온 곳(D2에서 사용 예정)
 export type PlaceStatus = 'visited' | 'want' | 'imported';
 
-// 지도에 표시하는 저장된 장소(핀) 한 건
+// 공개 범위 (소셜은 D단계). 지금은 항상 'private'로 저장한다.
+export type PlaceVisibility = 'private' | 'friends' | 'public';
+
+// 지도에 표시하는 저장된 장소(핀) 한 건 — "정체성"만 담는다.
+// 방문일·메모·사진은 visits/visit_photos에 있다(이 타입에 없다).
 export type Place = {
   id: string;
   name: string;
   latitude: number;
   longitude: number;
   status: PlaceStatus;
-  visited_on: string | null; // YYYY-MM-DD. visited면 필수, want/imported면 NULL
   plan_date: string | null; // YYYY-MM-DD. want의 계획일 (미정이면 NULL → 루트엔 안 들어감)
   plan_with: string | null; // 누구랑 갈지 (선택). 나중에 친구 연동으로 확장 예정.
-  memo: string | null;
-  address: string | null;
-  kakao_place_id: string | null;
+  address: string | null; // 카카오에서 받은 주소
+  kakao_place_id: string | null; // 카카오 장소 고유 ID (중복 저장 방지·재방문 연결에 사용)
   category_id: string | null; // 카테고리 (null = 분류 없음)
   source: string | null; // 가져온 루트의 출처 (D2). 체크인해도 지우지 않는다.
-  created_at: string; // 같은 날 안에서 시간순 정렬에 사용
+  visibility: PlaceVisibility;
+  created_at: string;
 };
 
-// 새 장소를 저장할 때 넘기는 값
+// 새 장소를 저장할 때 넘기는 값 (정체성만 — 방문 정보는 visits로 따로 저장)
 export type NewPlace = {
   name: string;
   latitude: number;
   longitude: number;
   status: PlaceStatus;
-  visited_on: string | null;
   plan_date: string | null;
   plan_with: string | null;
-  memo: string | null;
   address: string | null;
   kakao_place_id: string | null;
   category_id: string | null;
 };
 
 const PLACE_COLUMNS =
-  'id, name, latitude, longitude, status, visited_on, plan_date, plan_with, memo, address, kakao_place_id, category_id, source, created_at';
+  'id, name, latitude, longitude, status, plan_date, plan_with, address, kakao_place_id, category_id, source, visibility, created_at';
 
 // 저장된 모든 핀 불러오기 (최신순)
 // RLS가 본인 행만 돌려주지만, 코드에서도 user_id로 한 번 더 한정한다(보조 방어).
@@ -63,19 +64,14 @@ export function todayString(): string {
   return `${y}-${m}-${d}`;
 }
 
-// 새 장소 한 건 저장하고, 저장된 결과를 돌려줌
+// 새 장소(정체성) 한 건 저장. visited여도 방문(visits)은 호출부가 따로 만든다.
 export async function addPlace(place: NewPlace): Promise<Place> {
-  // 데이터 일관성 규칙: visited는 visited_on 사용(필수), want는 plan_date 사용(선택)
-  if (place.status === 'visited' && !place.visited_on) {
-    throw new Error('다녀온 곳은 방문 날짜가 필요합니다.');
-  }
+  // visited는 계획값(plan_*)을 두지 않는다. want/imported는 plan_date(선택)만.
   const normalized: NewPlace =
-    place.status === 'visited'
-      ? { ...place, plan_date: null, plan_with: null }
-      : { ...place, visited_on: null };
-  // 소유자는 현재 로그인 사용자로 고정 (RLS 정책 통과 + 데이터 격리)
+    place.status === 'visited' ? { ...place, plan_date: null, plan_with: null } : place;
+  // 소유자는 현재 로그인 사용자, 공개범위는 기본 비공개로 고정
   const userId = await getCurrentUserId();
-  const row = { ...normalized, user_id: userId };
+  const row = { ...normalized, user_id: userId, visibility: 'private' as const };
 
   const { data, error } = await supabase
     .from('places')
@@ -87,31 +83,16 @@ export async function addPlace(place: NewPlace): Promise<Place> {
   return data as Place;
 }
 
-// 체크인: '가보고 싶은 곳'을 '다녀온 곳'으로 바꾸고 방문 날짜를 오늘로 채운다.
-// 메모는 선택사항 — 입력했을 때만 저장한다(비우면 기존 값 유지).
-// status/visited_on(/memo)만 갱신하므로 source 등 다른 값은 그대로 보존된다.
-export async function checkInPlace(
-  placeId: string,
-  memo?: string
-): Promise<{ visited_on: string; memo: string | null }> {
-  const visited_on = todayString();
-  const trimmed = memo?.trim() || '';
-  const update: { status: PlaceStatus; visited_on: string; memo?: string } = {
-    status: 'visited',
-    visited_on,
-  };
-  if (trimmed) update.memo = trimmed;
-
-  // 본인 장소만 갱신 (RLS와 함께 보조 한정)
+// 장소 상태를 '다녀온 곳'으로 전환 (가볼→가본 체크인 시).
+// source 등 다른 값은 건드리지 않는다. 방문 한 건은 호출부가 visits에 따로 추가한다.
+export async function markPlaceVisited(placeId: string): Promise<void> {
   const userId = await getCurrentUserId();
   const { error } = await supabase
     .from('places')
-    .update(update)
+    .update({ status: 'visited' })
     .eq('id', placeId)
     .eq('user_id', userId);
-
   if (error) throw error;
-  return { visited_on, memo: trimmed || null };
 }
 
 // 저장된 장소의 카테고리만 변경 (null이면 분류 해제)
