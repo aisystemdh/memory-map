@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { getCurrentUserId } from './currentUser';
 
 // 장소 상태: 가본 곳 / 가보고 싶은 곳 / 가져온 곳(D2에서 사용 예정)
 export type PlaceStatus = 'visited' | 'want' | 'imported';
@@ -40,10 +41,13 @@ const PLACE_COLUMNS =
   'id, name, latitude, longitude, status, visited_on, plan_date, plan_with, memo, address, kakao_place_id, category_id, source, created_at';
 
 // 저장된 모든 핀 불러오기 (최신순)
+// RLS가 본인 행만 돌려주지만, 코드에서도 user_id로 한 번 더 한정한다(보조 방어).
 export async function fetchPlaces(): Promise<Place[]> {
+  const userId = await getCurrentUserId();
   const { data, error } = await supabase
     .from('places')
     .select(PLACE_COLUMNS)
+    .eq('user_id', userId)
     .order('created_at', { ascending: false });
 
   if (error) throw error;
@@ -65,10 +69,13 @@ export async function addPlace(place: NewPlace): Promise<Place> {
   if (place.status === 'visited' && !place.visited_on) {
     throw new Error('다녀온 곳은 방문 날짜가 필요합니다.');
   }
-  const row: NewPlace =
+  const normalized: NewPlace =
     place.status === 'visited'
       ? { ...place, plan_date: null, plan_with: null }
       : { ...place, visited_on: null };
+  // 소유자는 현재 로그인 사용자로 고정 (RLS 정책 통과 + 데이터 격리)
+  const userId = await getCurrentUserId();
+  const row = { ...normalized, user_id: userId };
 
   const { data, error } = await supabase
     .from('places')
@@ -95,7 +102,13 @@ export async function checkInPlace(
   };
   if (trimmed) update.memo = trimmed;
 
-  const { error } = await supabase.from('places').update(update).eq('id', placeId);
+  // 본인 장소만 갱신 (RLS와 함께 보조 한정)
+  const userId = await getCurrentUserId();
+  const { error } = await supabase
+    .from('places')
+    .update(update)
+    .eq('id', placeId)
+    .eq('user_id', userId);
 
   if (error) throw error;
   return { visited_on, memo: trimmed || null };
@@ -106,10 +119,12 @@ export async function updatePlaceCategory(
   placeId: string,
   categoryId: string | null
 ): Promise<void> {
+  const userId = await getCurrentUserId();
   const { error } = await supabase
     .from('places')
     .update({ category_id: categoryId })
-    .eq('id', placeId);
+    .eq('id', placeId)
+    .eq('user_id', userId);
 
   if (error) throw error;
 }
