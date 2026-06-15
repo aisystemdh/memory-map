@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -10,11 +11,13 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-// 로그인 기능이 없으므로 세션 저장(persistSession)은 끕니다.
+// 로그인 세션을 기기에 저장(AsyncStorage)해 앱을 껐다 켜도 유지되게 한다.
+// detectSessionInUrl은 웹 전용이라 RN에서는 끈다.
 export const supabase = createClient(supabaseUrl ?? '', supabaseAnonKey ?? '', {
   auth: {
-    persistSession: false,
-    autoRefreshToken: false,
+    storage: AsyncStorage,
+    persistSession: true,
+    autoRefreshToken: true,
     detectSessionInUrl: false,
   },
 });
