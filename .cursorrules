@@ -53,16 +53,18 @@
 ### 보기 모드 구조 (기존 '날짜뷰/카테고리뷰 토글'은 폐기)
 - 최상위는 [루트로 보기] / [카테고리로 보기] 2분기.
 - 카테고리로 보기: 가본(실선)+가볼(점선) 핀을 한 지도에 함께 표시. 핀 색=카테고리, Polyline 없음, 카테고리 필터(전체 보기 포함).
-- 루트로 보기: 가본/가볼 선택 → 달력(가본=visited_on 날짜만, 가볼=plan_date 날짜만 활성) → 해당일 Polyline+핀.
+- 루트로 보기: 가본/가볼 선택 → 달력(가본=방문일 visits.visited_on, 가볼=places.plan_date 날짜만 활성) → 해당일 Polyline+핀. 가본 동선은 visit 단위다(같은 장소를 다른 날 가면 각 날짜 루트에 각각 들어간다).
 
 ### 메모 입력 시점
-- 'want' 저장 시 메모를 받지 않는다. 'visited' 저장 시 메모 입력 가능.
+- 'want' 저장 시 메모를 받지 않는다. 'visited' 저장 시 첫 방문의 메모를 입력받는다.
 - 'want'를 체크인하는 순간 한 줄 메모(선택)를 입력받는다. 비워도 체크인된다.
+- 메모는 places가 아니라 그 방문(visits.memo)에 저장된다. 방문마다 메모가 따로 있다.
 
 ### 장소 발견/추가 흐름
 - 주변 장소 자동 라벨 레이어는 폐기했다(애플 지도 바탕 상호명과 겹침·누락 많음). 다시 만들지 마라 — v2 이후 메모 참고.
 - 진입점: 키워드 검색(SearchBar) 결과 탭 → "장소 상세 카드" 경유 → 카드에서 "가볼 곳으로 찜" / "다녀온 곳으로 기록" → SavePlaceModal. (검색 결과에서 바로 저장 모달을 띄우지 않는다)
-- 내 저장 핀 탭은 기존 PlaceCard(메모·사진·체크인)를 유지한다.
+- 내 저장 핀 탭 → PlaceCard. visited는 방문 슬라이드(visits별 날짜·메모·사진 + 방문 추가, 최근 방문이 먼저), want/imported는 계획정보(plan_date/plan_with)+체크인.
+- 같은 장소를 다시 저장하려 하면(kakao_place_id 일치) 새 핀을 만들지 않고 그 장소에 방문(visits)을 추가한다(재방문). 핀은 1개로 유지.
 - 상세 카드 구성: 이름/주소/카테고리/전화(있으면 tel: 링크, 없으면 숨김) + 리뷰·사진 영역은 placeholder("준비 중")로 구조만. 리뷰 데이터 연결은 E1에서.
 
 ### 카테고리
@@ -170,18 +172,38 @@ git pull
 ## 커밋 메시지 규칙
 - feat: 새 기능 / fix: 버그 수정 / chore: 설정·잡일 / docs: 문서 수정
 - 예) feat: 지도에 장소 핀 저장 기능 추가
+- 커밋 메시지에 화살표(→)나 특수문자·따옴표(작은따옴표·큰따옴표·가운뎃점 등)를 쓰지 마라. 셸(PowerShell here-string) 파싱이 깨져 커밋이 실패한다. 제목은 영문/숫자/하이픈 위주로 짧게.
 
 ## 약속
 - 브랜치에 커밋할 때는 항상 푸시도 같이 한다. (작업물 즉시 백업)
 - 한 기능을 끝까지 만들고 오류·예외 테스트가 끝나면, main에 반영하기 전에 사용자에게 물어본다.
 - API 키 같은 비밀값은 절대 커밋하지 않는다. (.env에만 보관)
-## 데이터 스키마 (항상 이 구조를 따를 것)
-테이블: profiles / categories / places / place_photos
-places.status 허용값: 'visited' | 'want' | 'imported' (기본값 없음, 항상 명시)
-places.visited_on: status='visited'면 필수, 'want'/'imported'면 NULL
-places.plan_date(date, NULL): 가볼 곳(want)의 계획일. 'want'의 루트 연결 기준.
-places.plan_with(text, NULL): 누구랑 갈지(선택 입력).
-데이터 규칙: status='visited' → visited_on 사용·plan_date 무시 / status='want' → plan_date 사용·visited_on은 NULL
-인증 계층(profiles, user_id, RLS, CASCADE 체인)은 C1 단계에서 일괄 도입한다. 현재 DB는 user_id 없이 단일 사용자 전제.
-category 삭제 시 places.category_id → SET NULL (장소는 보존)
+## 데이터 스키마 (항상 이 구조를 따를 것 — 실제 DB와 일치, 2026-06-15 기준)
+
+핵심 원칙: 장소(places)=정체성만, 방문(visits)=한 장소에 여러 개, 사진(visit_photos)=방문에 속함.
+방문일·메모·사진은 places가 아니라 visits/visit_photos에 있다. places에서 찾지 마라.
+
+테이블: profiles / categories / places / visits / visit_photos
+
+- places (장소 정체성): id, user_id(FK→profiles), category_id(FK→categories, NULL=분류없음),
+  name, latitude, longitude, status('visited'|'want'|'imported', 기본값 없음·INSERT마다 명시),
+  plan_date(date, NULL), plan_with(text, NULL), source(text, NULL),
+  visibility('private'|'friends'|'public', 기본 'private'), address(text, NULL),
+  kakao_place_id(text, NULL), created_at.
+  ※ places에는 visited_on, memo가 없다(visits로 이동).
+- visits (방문 1건): id, place_id(FK→places), visited_on(date, NOT NULL), memo(text, NULL), created_at.
+  한 place에 여러 visit. status='visited'면 visits 1개 이상, 'want'/'imported'면 0개.
+- visit_photos (사진): id, visit_id(FK→visits), storage_path, created_at. Storage 경로는 '{visit_id}/파일명'.
+  (구 place_photos는 폐기됨)
+- categories: id, user_id(FK→profiles), name, color(hex), created_at.
+- profiles: id(=auth.users.id), nickname, avatar_url, created_at. 가입 시 트리거로 자동 생성.
+
+핵심 규칙:
+- 방문일·메모·사진은 places가 아니라 visits/visit_photos에 있다. places에서 찾지 마라.
+- 같은 장소 판단은 kakao_place_id로 한다(중복 저장 방지·재방문 연결). 이름·좌표 근접으로 판단하지 마라.
+- 신규 장소 visibility 기본은 'private'. 사용자가 선택하지 않은 공개를 임의로 넣지 마라.
+- 동선: 가본=visits.visited_on 기준(visit 단위), 가볼=places.plan_date 기준. plan_date 없는 want는 루트에서 빠진다.
+- status와 source는 독립. 'imported'를 체크인하면 status만 'visited'로 바뀌고 source는 보존.
+- RLS: 모든 테이블 본인 데이터만. visits는 부모 place가 본인 것일 때, visit_photos는 그 방문의 place가 본인 것일 때.
+- category 삭제 시 places.category_id → SET NULL (장소는 보존).
 상세 설계: docs/schema-plan.md 참고
