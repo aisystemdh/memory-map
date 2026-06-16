@@ -22,6 +22,7 @@ export type Place = {
   category_id: string | null; // 카테고리 (null = 분류 없음)
   source: string | null; // 가져온 루트의 출처 (D2). 체크인해도 지우지 않는다.
   visibility: PlaceVisibility;
+  friend_note: string | null; // 친구에게 보여줄 한마디 (friends 공개 시). 사적 메모(visits.memo)와 별개.
   created_at: string;
 };
 
@@ -36,10 +37,12 @@ export type NewPlace = {
   address: string | null;
   kakao_place_id: string | null;
   category_id: string | null;
+  visibility: PlaceVisibility; // 'private'(나만) | 'friends'(친구에게 공개). public은 UI에 노출 안 함
+  friend_note: string | null; // 친구에게 보여줄 한마디 (friends일 때만 값, 아니면 null)
 };
 
 const PLACE_COLUMNS =
-  'id, name, latitude, longitude, status, plan_date, plan_with, address, kakao_place_id, category_id, source, visibility, created_at';
+  'id, name, latitude, longitude, status, plan_date, plan_with, address, kakao_place_id, category_id, source, visibility, friend_note, created_at';
 
 // 저장된 모든 핀 불러오기 (최신순)
 // RLS가 본인 행만 돌려주지만, 코드에서도 user_id로 한 번 더 한정한다(보조 방어).
@@ -65,13 +68,14 @@ export function todayString(): string {
 }
 
 // 새 장소(정체성) 한 건 저장. visited여도 방문(visits)은 호출부가 따로 만든다.
+// 공개범위(visibility)는 저장 모달에서 고른 값을 그대로 쓴다(기본은 모달이 'private'로 둠).
 export async function addPlace(place: NewPlace): Promise<Place> {
   // visited는 계획값(plan_*)을 두지 않는다. want/imported는 plan_date(선택)만.
   const normalized: NewPlace =
     place.status === 'visited' ? { ...place, plan_date: null, plan_with: null } : place;
-  // 소유자는 현재 로그인 사용자, 공개범위는 기본 비공개로 고정
+  // 소유자는 현재 로그인 사용자
   const userId = await getCurrentUserId();
-  const row = { ...normalized, user_id: userId, visibility: 'private' as const };
+  const row = { ...normalized, user_id: userId };
 
   const { data, error } = await supabase
     .from('places')
@@ -81,6 +85,25 @@ export async function addPlace(place: NewPlace): Promise<Place> {
 
   if (error) throw error;
   return data as Place;
+}
+
+// 저장된 장소의 공개범위 변경 (나만 보기 ↔ 친구에게 공개).
+// friends로 바꿀 때는 친구 한마디(friend_note)도 함께 저장한다.
+// private로 바꿀 때는 friend_note를 건드리지 않는다(친구가 그 장소를 못 보므로 남아 있어도 무방).
+export async function updatePlaceVisibility(
+  placeId: string,
+  visibility: PlaceVisibility,
+  friendNote?: string | null
+): Promise<void> {
+  const userId = await getCurrentUserId();
+  const update: { visibility: PlaceVisibility; friend_note?: string | null } = { visibility };
+  if (friendNote !== undefined) update.friend_note = friendNote;
+  const { error } = await supabase
+    .from('places')
+    .update(update)
+    .eq('id', placeId)
+    .eq('user_id', userId);
+  if (error) throw error;
 }
 
 // 장소 상태를 '다녀온 곳'으로 전환 (가볼→가본 체크인 시).

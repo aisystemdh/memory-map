@@ -16,7 +16,7 @@ import {
 import { KakaoPlace } from '../lib/kakao';
 import { pickPhotos, PickedPhoto } from '../lib/photos';
 import { Category, CATEGORY_PALETTE } from '../lib/categories';
-import { PlaceStatus } from '../lib/places';
+import { PlaceStatus, PlaceVisibility } from '../lib/places';
 
 type Props = {
   // 저장할 대상 장소. null이면 모달이 닫힘.
@@ -33,7 +33,9 @@ type Props = {
     photos: PickedPhoto[],
     categoryId: string | null,
     planDate: string | null, // 가보고 싶은 곳의 계획일 (미정이면 null)
-    planWith: string | null // 가보고 싶은 곳의 동행 (선택)
+    planWith: string | null, // 가보고 싶은 곳의 동행 (선택)
+    visibility: PlaceVisibility, // 공개범위 (나만 보기 / 친구에게 공개)
+    friendNote: string | null // 친구에게 한마디 (friends일 때만, 아니면 null)
   ) => void;
   // 인라인 카테고리 생성 — 만든 카테고리(실패 시 null)를 돌려받아 바로 선택한다
   onCreateCategory: (name: string, color: string) => Promise<Category | null>;
@@ -74,6 +76,10 @@ export default function SavePlaceModal({
   const [planDate, setPlanDate] = useState<Date | null>(null);
   const [planWith, setPlanWith] = useState('');
   const [showPlanPicker, setShowPlanPicker] = useState(false);
+  // 공개범위 (기본: 나만 보기). public은 UI에 노출하지 않는다.
+  const [visibility, setVisibility] = useState<PlaceVisibility>('private');
+  // 친구에게 한마디 (friends일 때만 입력)
+  const [friendNote, setFriendNote] = useState('');
   // 인라인 카테고리 생성 폼 (모달을 벗어나지 않고 만든다)
   const [newCatOpen, setNewCatOpen] = useState(false);
   const [newCatName, setNewCatName] = useState('');
@@ -92,6 +98,8 @@ export default function SavePlaceModal({
     setPlanDate(null);
     setPlanWith('');
     setShowPlanPicker(false);
+    setVisibility('private');
+    setFriendNote('');
     resetNewCategory();
   }
 
@@ -137,7 +145,9 @@ export default function SavePlaceModal({
       photos,
       categoryId,
       status === 'want' && planDate ? toDateString(planDate) : null,
-      status === 'want' ? planWith.trim() || null : null
+      status === 'want' ? planWith.trim() || null : null,
+      visibility,
+      visibility === 'friends' ? friendNote.trim() || null : null
     );
     reset();
   }
@@ -198,6 +208,45 @@ export default function SavePlaceModal({
               </Text>
             </TouchableOpacity>
           </View>
+
+          {/* 공개범위 — 나만 보기 / 친구에게 공개 (public은 노출 안 함) */}
+          <Text style={styles.label}>공개범위</Text>
+          <View style={styles.statusRow}>
+            <TouchableOpacity
+              style={[styles.statusButton, visibility === 'private' && styles.statusButtonSelected]}
+              onPress={() => setVisibility('private')}
+            >
+              <Text
+                style={[styles.statusText, visibility === 'private' && styles.statusTextSelected]}
+              >
+                나만 보기
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.statusButton, visibility === 'friends' && styles.statusButtonSelected]}
+              onPress={() => setVisibility('friends')}
+            >
+              <Text
+                style={[styles.statusText, visibility === 'friends' && styles.statusTextSelected]}
+              >
+                친구에게 공개
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* 친구에게 한마디 — '친구에게 공개'일 때만 펼쳐진다 */}
+          {visibility === 'friends' && (
+            <>
+              <Text style={styles.label}>친구에게 한마디</Text>
+              <TextInput
+                style={styles.memoInput}
+                placeholder="친구에게 보여줄 한마디 (선택)"
+                value={friendNote}
+                onChangeText={setFriendNote}
+                maxLength={100}
+              />
+            </>
+          )}
 
           {/* 방문 날짜는 '다녀온 곳'일 때만 입력 */}
           {status === 'visited' && (

@@ -4,11 +4,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   useWindowDimensions,
   View,
 } from 'react-native';
-import { Place } from '../lib/places';
+import { Place, PlaceVisibility } from '../lib/places';
 import { Visit } from '../lib/visits';
 import {
   fetchPhotosByVisits,
@@ -27,6 +28,12 @@ type Props = {
   categories: Category[];
   // 분류 변경 (null = 분류 해제). 실제 저장·상태 갱신은 App이 담당.
   onChangeCategory: (placeId: string, categoryId: string | null) => void;
+  // 공개범위 변경 (나만 보기 / 친구에게 공개). friends일 때는 친구 한마디(friendNote)도 함께.
+  onChangeVisibility: (
+    placeId: string,
+    visibility: PlaceVisibility,
+    friendNote?: string | null
+  ) => void;
   // 방문 추가/체크인 시트 열기 요청 (실제 저장은 App이 담당).
   onRequestAddVisit: (place: Place) => void;
   onClose: () => void;
@@ -37,6 +44,7 @@ export default function PlaceCard({
   visits,
   categories,
   onChangeCategory,
+  onChangeVisibility,
   onRequestAddVisit,
   onClose,
 }: Props) {
@@ -50,6 +58,11 @@ export default function PlaceCard({
   const [pickerOpen, setPickerOpen] = useState(false);
   // 사진 추가 중인 방문 id (버튼 비활성화용)
   const [addingTo, setAddingTo] = useState<string | null>(null);
+  // 친구 한마디 입력 초안 (place가 바뀌면 그 장소의 friend_note로 초기화)
+  const [noteDraft, setNoteDraft] = useState('');
+  useEffect(() => {
+    setNoteDraft(place?.friend_note ?? '');
+  }, [place?.id, place?.friend_note]);
 
   // 훅은 early return 전에 호출. 방문 목록이 바뀌면 사진을 다시 불러온다.
   const visitIdsKey = visits.map((v) => v.id).join(',');
@@ -150,6 +163,45 @@ export default function PlaceCard({
             </TouchableOpacity>
           ))}
         </ScrollView>
+      )}
+
+      {/* 공개범위 — 나만 보기 / 친구에게 공개 */}
+      <View style={styles.visRow}>
+        <TouchableOpacity
+          style={[styles.visButton, place.visibility === 'private' && styles.visButtonOn]}
+          onPress={() => onChangeVisibility(place.id, 'private')}
+        >
+          <Text style={[styles.visText, place.visibility === 'private' && styles.visTextOn]}>
+            나만 보기
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.visButton, place.visibility === 'friends' && styles.visButtonOn]}
+          onPress={() => onChangeVisibility(place.id, 'friends', noteDraft)}
+        >
+          <Text style={[styles.visText, place.visibility === 'friends' && styles.visTextOn]}>
+            친구에게 공개
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* 친구 한마디 — '친구에게 공개'일 때만. 입력 후 저장하면 갱신된다. */}
+      {place.visibility === 'friends' && (
+        <View style={styles.noteBox}>
+          <TextInput
+            style={styles.noteInput}
+            placeholder="친구에게 한마디 (선택)"
+            value={noteDraft}
+            onChangeText={setNoteDraft}
+            maxLength={100}
+          />
+          <TouchableOpacity
+            style={styles.noteSave}
+            onPress={() => onChangeVisibility(place.id, 'friends', noteDraft)}
+          >
+            <Text style={styles.noteSaveText}>한마디 저장</Text>
+          </TouchableOpacity>
+        </View>
       )}
 
       {isVisited ? (
@@ -275,6 +327,55 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#374151',
+  },
+  visRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
+  visButton: {
+    flex: 1,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 10,
+    paddingVertical: 9,
+    alignItems: 'center',
+  },
+  visButtonOn: {
+    backgroundColor: '#dbeafe',
+    borderWidth: 1.5,
+    borderColor: '#2563eb',
+  },
+  visText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#6b7280',
+  },
+  visTextOn: {
+    color: '#1d4ed8',
+  },
+  noteBox: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  noteInput: {
+    flex: 1,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 14,
+  },
+  noteSave: {
+    backgroundColor: '#db2777',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+  },
+  noteSaveText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
   },
   pickerRow: {
     marginTop: 8,

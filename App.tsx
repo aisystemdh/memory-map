@@ -9,6 +9,9 @@ import PlaceMarker from './components/PlaceMarker';
 import SavePlaceModal from './components/SavePlaceModal';
 import SearchBar from './components/SearchBar';
 import VisitInputModal from './components/VisitInputModal';
+import FriendsScreen from './screens/FriendsScreen';
+import FriendPlaceCard from './components/FriendPlaceCard';
+import { PickedFriendPlace } from './screens/FriendPlacesPanel';
 import { KakaoPlace } from './lib/kakao';
 import {
   addPlace,
@@ -16,8 +19,10 @@ import {
   fetchPlaces,
   todayString,
   updatePlaceCategory,
+  updatePlaceVisibility,
   Place,
   PlaceStatus,
+  PlaceVisibility,
 } from './lib/places';
 import { addVisit, fetchAllVisits, Visit } from './lib/visits';
 import { uploadPhotos, PickedPhoto } from './lib/photos';
@@ -31,11 +36,13 @@ type ViewState =
   | { mode: 'category'; filterCategoryId: string | null } // null = 전체 보기
   | { mode: 'route'; routeStatus: RouteStatus; selectedDate: string | null };
 
+// 앱 시작 화면은 대한민국 전국이 보이게(중심 대략 위도 36.5, 경도 127.8).
+// 사용자가 해외로 움직이는 것은 막지 않는다(해외 장소 기록 가능).
 const INITIAL_REGION: Region = {
-  latitude: 37.5665,
-  longitude: 126.978,
-  latitudeDelta: 0.05,
-  longitudeDelta: 0.05,
+  latitude: 36.5,
+  longitude: 127.8,
+  latitudeDelta: 5.0,
+  longitudeDelta: 5.0,
 };
 
 export default function App() {
@@ -74,6 +81,10 @@ export default function App() {
   const [routePickerVisible, setRoutePickerVisible] = useState(false);
   // [카테고리로 보기] 진입 시 "카테고리 고르기" 시트 열림 여부
   const [categoryPickerVisible, setCategoryPickerVisible] = useState(false);
+  // 친구 화면(관리+친구장소 탭) 열림 여부
+  const [friendsVisible, setFriendsVisible] = useState(false);
+  // 지도에서 보여줄 친구의 공개 장소 (읽기 전용 카드). 내 places 상태와 별개 — 오염 방지.
+  const [friendCardPlace, setFriendCardPlace] = useState<PickedFriendPlace | null>(null);
 
   // 핀 색 결정용: 카테고리 id → 색
   const categoryColorById = useMemo(
@@ -137,6 +148,7 @@ export default function App() {
   function handleSelect(place: KakaoPlace) {
     setDetailPlace(place);
     setSelectedPlace(null);
+    setFriendCardPlace(null);
     mapRef.current?.animateToRegion({
       latitude: place.latitude,
       longitude: place.longitude,
@@ -230,6 +242,28 @@ export default function App() {
     }
   }
 
+  // 카드에서 공개범위 변경(나만 보기 ↔ 친구에게 공개): DB 갱신 후 화면 상태도 맞춰준다.
+  // friends일 때는 친구 한마디(friendNote)도 함께 저장한다.
+  async function handleChangeVisibility(
+    placeId: string,
+    visibility: PlaceVisibility,
+    friendNote?: string | null
+  ) {
+    try {
+      const note = friendNote === undefined ? undefined : friendNote?.trim() || null;
+      await updatePlaceVisibility(placeId, visibility, note);
+      const apply = (p: Place): Place => ({
+        ...p,
+        visibility,
+        friend_note: note === undefined ? p.friend_note : note,
+      });
+      setPlaces((prev) => prev.map((p) => (p.id === placeId ? apply(p) : p)));
+      setSelectedPlace((prev) => (prev && prev.id === placeId ? apply(prev) : prev));
+    } catch (e) {
+      Alert.alert('공개범위 변경 실패', e instanceof Error ? e.message : '오류가 발생했습니다.');
+    }
+  }
+
   // 카테고리 삭제: DB가 장소의 분류를 자동 해제(SET NULL)하므로 화면 상태도 맞춰준다.
   async function handleRemoveCategory(id: string) {
     const ok = await removeCategoryItem(id);
@@ -247,6 +281,21 @@ export default function App() {
   // 카드에서 "방문 추가"/"체크인"을 누르면 방문 입력 시트를 연다
   function handleRequestAddVisit(place: Place) {
     setVisitTarget(place);
+  }
+
+  // 친구 장소 이름을 누르면: 친구 화면을 닫고 그 위치로 지도 이동 + 읽기전용 친구 카드.
+  // 친구 장소는 내 places/visits 상태에 넣지 않는다(임시 표시만).
+  function handlePickFriendPlace(picked: PickedFriendPlace) {
+    setFriendsVisible(false);
+    setSelectedPlace(null);
+    setDetailPlace(null);
+    setFriendCardPlace(picked);
+    mapRef.current?.animateToRegion({
+      latitude: picked.place.latitude,
+      longitude: picked.place.longitude,
+      latitudeDelta: 0.01,
+      longitudeDelta: 0.01,
+    });
   }
 
   // 방문 입력 제출 — visits에 추가 + 사진 업로드 + (want였으면) status를 visited로 전환.
@@ -299,7 +348,9 @@ export default function App() {
     photos: PickedPhoto[],
     categoryId: string | null,
     planDate: string | null,
-    planWith: string | null
+    planWith: string | null,
+    visibility: PlaceVisibility,
+    friendNote: string | null
   ) {
     if (!pending) return;
     setSaving(true);
@@ -314,6 +365,8 @@ export default function App() {
         address: pending.address || null,
         kakao_place_id: pending.id || null,
         category_id: categoryId,
+        visibility,
+        friend_note: friendNote,
       });
       setPlaces((prev) => [saved, ...prev]);
 
@@ -383,6 +436,7 @@ export default function App() {
               onPress={() => {
                 setSelectedPlace(p);
                 setDetailPlace(null);
+                setFriendCardPlace(null);
               }}
             />
           );
@@ -452,6 +506,14 @@ export default function App() {
         <Text style={styles.sideButtonText}>카테고리</Text>
       </TouchableOpacity>
 
+      {/* 친구 관리 화면 열기 */}
+      <TouchableOpacity
+        style={[styles.sideButton, styles.friendsButton]}
+        onPress={() => setFriendsVisible(true)}
+      >
+        <Text style={styles.sideButtonText}>친구</Text>
+      </TouchableOpacity>
+
       {/* 권한 거부·오류 시 짧은 안내 (지도·기존 기능은 그대로 동작) */}
       {(status === 'denied' || status === 'error') && (
         <View style={styles.permissionNotice}>
@@ -464,6 +526,7 @@ export default function App() {
         visits={selectedPlaceVisits}
         categories={categories}
         onChangeCategory={handleChangeCategory}
+        onChangeVisibility={handleChangeVisibility}
         onRequestAddVisit={handleRequestAddVisit}
         onClose={() => setSelectedPlace(null)}
       />
@@ -474,6 +537,9 @@ export default function App() {
         onSaveAs={handleSaveAs}
         onClose={() => setDetailPlace(null)}
       />
+
+      {/* 친구의 공개 장소 — 읽기 전용 카드 (편집/체크인 없음, 내 데이터와 분리) */}
+      <FriendPlaceCard picked={friendCardPlace} onClose={() => setFriendCardPlace(null)} />
 
       {/* 방문 추가/체크인 입력 시트 (날짜+메모+사진) */}
       <VisitInputModal
@@ -513,6 +579,13 @@ export default function App() {
         onAdd={addCategoryItem}
         onRemove={handleRemoveCategory}
         onClose={() => setCategoryModalVisible(false)}
+      />
+
+      {/* 친구 화면 — 하나의 모달 안에서 [친구 관리]/[친구가 가본 곳] 탭 전환 */}
+      <FriendsScreen
+        visible={friendsVisible}
+        onClose={() => setFriendsVisible(false)}
+        onPickFriendPlace={handlePickFriendPlace}
       />
 
       {/* [루트로 보기] 진입용 — 가본 곳/가볼 곳을 고르면 달력이 이어서 열린다 */}
@@ -637,6 +710,10 @@ const styles = StyleSheet.create({
   categoryManageButton: {
     marginTop: 224,
     backgroundColor: '#7c3aed',
+  },
+  friendsButton: {
+    marginTop: 280,
+    backgroundColor: '#db2777',
   },
   // 카테고리 고르기 리스트 모달
   pickerBackdrop: {
