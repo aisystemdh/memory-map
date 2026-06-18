@@ -261,11 +261,6 @@ export default function PlaceCard({
           <Text style={styles.wantLabel}>
             {place.status === 'want' ? '가보고 싶은 곳' : '가져온 장소'}
           </Text>
-          {place.plan_date ? (
-            <Text style={styles.planText}>계획일: {place.plan_date}</Text>
-          ) : (
-            <Text style={styles.planTextMuted}>계획일 미정</Text>
-          )}
           {place.plan_with ? <Text style={styles.planText}>함께: {place.plan_with}</Text> : null}
 
           <TouchableOpacity style={styles.checkInButton} onPress={() => onRequestAddVisit(place)}>

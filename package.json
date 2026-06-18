@@ -6,6 +6,7 @@
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "8.4.4",
     "@supabase/supabase-js": "^2.107.0",
+    "babel-preset-expo": "~54.0.10",
     "base64-arraybuffer": "^1.0.2",
     "expo": "^54.0.0",
     "expo-clipboard": "~8.0.8",

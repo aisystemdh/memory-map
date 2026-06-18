@@ -23,6 +23,7 @@ export type Place = {
   source: string | null; // 가져온 루트의 출처 (D2). 체크인해도 지우지 않는다.
   visibility: PlaceVisibility;
   friend_note: string | null; // 친구에게 보여줄 한마디 (friends 공개 시). 사적 메모(visits.memo)와 별개.
+  imported_from: string | null; // 가져온 루트(route_imports.id). NULL이면 내가 직접 만든 장소(D2).
   created_at: string;
 };
 
@@ -42,7 +43,7 @@ export type NewPlace = {
 };
 
 const PLACE_COLUMNS =
-  'id, name, latitude, longitude, status, plan_date, plan_with, address, kakao_place_id, category_id, source, visibility, friend_note, created_at';
+  'id, name, latitude, longitude, status, plan_date, plan_with, address, kakao_place_id, category_id, source, visibility, friend_note, imported_from, created_at';
 
 // 저장된 모든 핀 불러오기 (최신순)
 // RLS가 본인 행만 돌려주지만, 코드에서도 user_id로 한 번 더 한정한다(보조 방어).
@@ -130,5 +131,91 @@ export async function updatePlaceCategory(
     .eq('id', placeId)
     .eq('user_id', userId);
 
+  if (error) throw error;
+}
+
+// 가져온 루트(route_import)를 풀 때 복제할 장소의 최소 정보
+export type ImportedPlaceInput = {
+  name: string;
+  latitude: number;
+  longitude: number;
+  address: string | null;
+  kakao_place_id: string | null;
+};
+
+// 여러 장소를 내 지도에 '가볼 곳(want)'으로 한꺼번에 복제 저장한다.
+// 좌표/이름/주소/kakao_place_id만 복사하고 status='want', visibility='private',
+// source(출처)와 imported_from을 박는다.
+// - 가져온 루트 풀기(2단계): importId = route_imports.id, source = "닉네임: 루트제목"
+// - 내가 만든 루트를 내 가볼 곳에도 추가: importId = null, source = "내 루트: 제목"
+// 중복 방지/머지는 호출부가 판단한다.
+export async function addImportedPlaces(
+  items: ImportedPlaceInput[],
+  importId: string | null,
+  source: string
+): Promise<Place[]> {
+  if (items.length === 0) return [];
+  const userId = await getCurrentUserId();
+  const rows = items.map((it) => ({
+    user_id: userId,
+    name: it.name,
+    latitude: it.latitude,
+    longitude: it.longitude,
+    address: it.address ?? null,
+    kakao_place_id: it.kakao_place_id ?? null,
+    status: 'want' as PlaceStatus,
+    plan_date: null,
+    plan_with: null,
+    category_id: null,
+    source,
+    visibility: 'private' as PlaceVisibility,
+    friend_note: null,
+    imported_from: importId,
+  }));
+  const { data, error } = await supabase.from('places').insert(rows).select(PLACE_COLUMNS);
+  if (error) throw error;
+  return (data ?? []) as Place[];
+}
+
+// 이미 '내 지도에 추가'로 풀어놓은 route_import id들의 집합.
+// (그 import에서 나온 places가 하나라도 있으면 포함) — 중복 추가 방지·버튼 상태 표시에 쓴다.
+export async function fetchUnpackedImportIds(): Promise<Set<string>> {
+  const userId = await getCurrentUserId();
+  const { data, error } = await supabase
+    .from('places')
+    .select('imported_from')
+    .eq('user_id', userId)
+    .not('imported_from', 'is', null);
+  if (error) throw error;
+  return new Set((data ?? []).map((r: any) => r.imported_from as string));
+}
+
+// 내 장소들의 가벼운 요약 — 중복 판단(kakao_place_id)·출처 누적·가져온 루트 진행도에 쓴다.
+export type PlaceBrief = {
+  id: string;
+  status: PlaceStatus;
+  source: string | null;
+  kakao_place_id: string | null;
+  imported_from: string | null;
+};
+
+export async function fetchMyPlacesBrief(): Promise<PlaceBrief[]> {
+  const userId = await getCurrentUserId();
+  const { data, error } = await supabase
+    .from('places')
+    .select('id, status, source, kakao_place_id, imported_from')
+    .eq('user_id', userId);
+  if (error) throw error;
+  return (data ?? []) as PlaceBrief[];
+}
+
+// 한 장소의 출처(source) 문자열만 갱신한다(가져오기 머지 시 출처 누적용). status 등은 안 건드림.
+export async function updatePlaceSource(placeId: string, source: string): Promise<void> {
+  const userId = await getCurrentUserId();
+  const { error } = await supabase
+    .from('places')
+    .update({ source })
+    .eq('id', placeId)
+    .eq('user_id', userId);
   if (error) throw error;
 }
