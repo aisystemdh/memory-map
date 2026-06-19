@@ -1,4 +1,4 @@
-import DateTimePicker from '@react-native-community/datetimepicker';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { useEffect, useState } from 'react';
 import {
   Alert,
@@ -60,7 +60,6 @@ export default function SavePlaceModal({
 }: Props) {
   const [date, setDate] = useState<Date>(new Date());
   const [memo, setMemo] = useState('');
-  const [showPicker, setShowPicker] = useState(Platform.OS === 'ios');
   // 아직 저장 전, 사용자가 고른 사진들 (로컬 미리보기)
   const [photos, setPhotos] = useState<PickedPhoto[]>([]);
   const [picking, setPicking] = useState(false);
@@ -72,10 +71,8 @@ export default function SavePlaceModal({
   useEffect(() => {
     if (place) setStatus(initialStatus);
   }, [place, initialStatus]);
-  // 가보고 싶은 곳: 언제 갈지 (null = 날짜 미정) / 누구랑 (선택)
-  const [planDate, setPlanDate] = useState<Date | null>(null);
+  // 가보고 싶은 곳: 누구랑 (선택). want는 날짜 개념이 없다(순수 위시리스트).
   const [planWith, setPlanWith] = useState('');
-  const [showPlanPicker, setShowPlanPicker] = useState(false);
   // 공개범위 (기본: 나만 보기). public은 UI에 노출하지 않는다.
   const [visibility, setVisibility] = useState<PlaceVisibility>('private');
   // 친구에게 한마디 (friends일 때만 입력)
@@ -91,13 +88,10 @@ export default function SavePlaceModal({
   function reset() {
     setMemo('');
     setDate(new Date());
-    setShowPicker(Platform.OS === 'ios');
     setPhotos([]);
     setCategoryId(null);
     setStatus('visited');
-    setPlanDate(null);
     setPlanWith('');
-    setShowPlanPicker(false);
     setVisibility('private');
     setFriendNote('');
     resetNewCategory();
@@ -137,14 +131,14 @@ export default function SavePlaceModal({
   }
 
   function handleSave() {
-    // 가보고 싶은 곳: 방문 날짜·메모 없음(메모는 체크인 때), 대신 계획일·동행을 저장
+    // 가보고 싶은 곳: 방문 날짜·메모 없음(메모는 체크인 때). want는 날짜(plan_date) 없음 — 항상 null.
     onSave(
       status,
       status === 'visited' ? toDateString(date) : null,
       status === 'visited' ? memo.trim() : '',
       photos,
       categoryId,
-      status === 'want' && planDate ? toDateString(planDate) : null,
+      null,
       status === 'want' ? planWith.trim() || null : null,
       visibility,
       visibility === 'friends' ? friendNote.trim() || null : null
@@ -169,6 +163,18 @@ export default function SavePlaceModal({
     }
   }
 
+  // 안드로이드는 모달 안 인라인 DateTimePicker가 1970/튕김을 일으켜, 명령형 다이얼로그로 연다.
+  // 초기값은 항상 오늘(또는 기존 값)로 명시 — epoch(1970)가 되지 않는다.
+  function openVisitedPicker() {
+    DateTimePickerAndroid.open({
+      value: date,
+      mode: 'date',
+      maximumDate: new Date(),
+      onChange: (event, selected) => {
+        if (event.type === 'set' && selected) setDate(selected);
+      },
+    });
+  }
   return (
     <Modal
       visible={place !== null}
@@ -252,22 +258,17 @@ export default function SavePlaceModal({
           {status === 'visited' && (
             <>
               <Text style={styles.label}>날짜</Text>
-              {Platform.OS === 'android' && (
-                <TouchableOpacity
-                  style={styles.dateButton}
-                  onPress={() => setShowPicker(true)}
-                >
+              {Platform.OS === 'android' ? (
+                <TouchableOpacity style={styles.dateButton} onPress={openVisitedPicker}>
                   <Text style={styles.dateButtonText}>{toDateString(date)}</Text>
                 </TouchableOpacity>
-              )}
-              {showPicker && (
+              ) : (
                 <DateTimePicker
                   value={date}
                   mode="date"
                   display="default"
                   maximumDate={new Date()}
                   onChange={(event, selected) => {
-                    if (Platform.OS === 'android') setShowPicker(false);
                     if (event.type === 'set' && selected) setDate(selected);
                   }}
                 />
@@ -275,43 +276,9 @@ export default function SavePlaceModal({
             </>
           )}
 
-          {/* 가보고 싶은 곳: 계획일(미정 가능)과 동행을 입력 */}
+          {/* 가보고 싶은 곳: 날짜 없음(순수 위시리스트). 동행만 선택 입력 */}
           {status === 'want' && (
             <>
-              <Text style={styles.label}>언제 갈지 (선택)</Text>
-              <View style={styles.planDateRow}>
-                <TouchableOpacity
-                  style={styles.dateButton}
-                  onPress={() => setShowPlanPicker(true)}
-                >
-                  <Text style={styles.dateButtonText}>
-                    {planDate ? toDateString(planDate) : '날짜 미정'}
-                  </Text>
-                </TouchableOpacity>
-                {planDate && (
-                  <TouchableOpacity
-                    style={styles.planClearButton}
-                    onPress={() => {
-                      setPlanDate(null);
-                      setShowPlanPicker(false);
-                    }}
-                  >
-                    <Text style={styles.planClearText}>미정으로</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-              {showPlanPicker && (
-                <DateTimePicker
-                  value={planDate ?? new Date()}
-                  mode="date"
-                  display="default"
-                  onChange={(event, selected) => {
-                    if (Platform.OS === 'android') setShowPlanPicker(false);
-                    if (event.type === 'set' && selected) setPlanDate(selected);
-                  }}
-                />
-              )}
-
               <Text style={styles.label}>누구랑 (선택)</Text>
               <TextInput
                 style={styles.memoInput}

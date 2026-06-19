@@ -1,4 +1,4 @@
-import DateTimePicker from '@react-native-community/datetimepicker';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { useState } from 'react';
 import {
   Image,
@@ -35,16 +35,26 @@ function toDateString(date: Date): string {
 // 방문 추가와 체크인이 똑같이 쓴다(상태 전환 여부는 호출부가 판단).
 export default function VisitInputModal({ visible, title, saving, onSubmit, onCancel }: Props) {
   const [date, setDate] = useState<Date>(new Date());
-  const [showPicker, setShowPicker] = useState(Platform.OS === 'ios');
   const [memo, setMemo] = useState('');
   const [photos, setPhotos] = useState<PickedPhoto[]>([]);
   const [picking, setPicking] = useState(false);
 
   function reset() {
     setDate(new Date());
-    setShowPicker(Platform.OS === 'ios');
     setMemo('');
     setPhotos([]);
+  }
+
+  // 안드로이드는 모달 안 인라인 피커 문제를 피해 명령형 다이얼로그로 연다(초기값=오늘/기존).
+  function openDatePicker() {
+    DateTimePickerAndroid.open({
+      value: date,
+      mode: 'date',
+      maximumDate: new Date(),
+      onChange: (event, selected) => {
+        if (event.type === 'set' && selected) setDate(selected);
+      },
+    });
   }
 
   function handleSubmit() {
@@ -77,19 +87,17 @@ export default function VisitInputModal({ visible, title, saving, onSubmit, onCa
           <Text style={styles.title}>{title}</Text>
 
           <Text style={styles.label}>날짜</Text>
-          {Platform.OS === 'android' && (
-            <TouchableOpacity style={styles.dateButton} onPress={() => setShowPicker(true)}>
+          {Platform.OS === 'android' ? (
+            <TouchableOpacity style={styles.dateButton} onPress={openDatePicker}>
               <Text style={styles.dateButtonText}>{toDateString(date)}</Text>
             </TouchableOpacity>
-          )}
-          {showPicker && (
+          ) : (
             <DateTimePicker
               value={date}
               mode="date"
               display="default"
               maximumDate={new Date()}
               onChange={(event, selected) => {
-                if (Platform.OS === 'android') setShowPicker(false);
                 if (event.type === 'set' && selected) setDate(selected);
               }}
             />
